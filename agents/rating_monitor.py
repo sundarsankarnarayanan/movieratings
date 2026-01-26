@@ -40,17 +40,19 @@ class RatingMonitor:
     
     def scrape_rt_rating(self, movie_title):
         """Scrape Rotten Tomatoes rating for a movie"""
+        import json
+
         # Search for movie
         search_url = f"https://www.rottentomatoes.com/search?search={movie_title.replace(' ', '+')}"
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
         }
-        
+
         try:
             response = requests.get(search_url, headers=headers, timeout=10)
             response.raise_for_status()
             soup = BeautifulSoup(response.text, 'html.parser')
-            
+
             # Find first movie result in the movie results section
             movie_section = soup.select_one('search-page-result[type="movie"]')
             if not movie_section:
@@ -58,50 +60,68 @@ class RatingMonitor:
                 movie_link = soup.select_one('search-page-media-row a[slot="title"], a[data-qa="search-result-title"]')
             else:
                 movie_link = movie_section.select_one('search-page-media-row a[slot="title"]')
-            
+
             if not movie_link:
                 # Last resort fallback
                 movie_link = soup.select_one('a[href*="/m/"]')
-            
+
             if not movie_link:
                 return None
-            
+
             movie_url = movie_link['href']
             if not movie_url.startswith('http'):
                 movie_url = f"https://www.rottentomatoes.com{movie_url}"
-            
+
             # Get movie page
             movie_response = requests.get(movie_url, headers=headers, timeout=10)
             movie_response.raise_for_status()
             movie_soup = BeautifulSoup(movie_response.text, 'html.parser')
-            
-            # Extract ratings (expanded selectors for modern RT)
-            tomatometer = movie_soup.select_one('rt-text[slot="criticsScore"], [data-qa="tomatometer"]')
-            audience_score = movie_soup.select_one('rt-text[slot="audienceScore"], [data-qa="audience-score"]')
-            
+
             ratings = {}
-            
-            if tomatometer:
-                score_text = tomatometer.text.strip().replace('%', '')
+            review_counts = {}
+
+            # PRIMARY METHOD: Extract from JSON-LD schema data (most reliable)
+            for script in movie_soup.select('script[type="application/ld+json"]'):
                 try:
-                    ratings['tomatometer'] = float(score_text)
-                except Exception as e:
-                    print(f"      Failed to parse tomatometer '{score_text}': {e}")
-            
+                    data = json.loads(script.string)
+                    if data.get('@type') == 'Movie':
+                        agg = data.get('aggregateRating', {})
+                        if agg.get('ratingValue'):
+                            ratings['tomatometer'] = float(agg['ratingValue'])
+                        if agg.get('reviewCount'):
+                            review_counts['critic_reviews'] = int(agg['reviewCount'])
+                        break
+                except Exception:
+                    pass
+
+            # FALLBACK: CSS selectors for audience score (not in JSON-LD)
+            if 'tomatometer' not in ratings:
+                tomatometer = movie_soup.select_one('rt-text[slot="criticsScore"], [data-qa="tomatometer"]')
+                if tomatometer:
+                    score_text = tomatometer.text.strip().replace('%', '')
+                    try:
+                        ratings['tomatometer'] = float(score_text)
+                    except Exception as e:
+                        print(f"      Failed to parse tomatometer '{score_text}': {e}")
+
+            audience_score = movie_soup.select_one('rt-text[slot="audienceScore"], [data-qa="audience-score"]')
             if audience_score:
                 score_text = audience_score.text.strip().replace('%', '')
                 try:
                     ratings['audience'] = float(score_text)
                 except Exception as e:
                     print(f"      Failed to parse audience score '{score_text}': {e}")
-            
-            # Also try to extract review counts
-            review_counts = self.scrape_review_counts(movie_soup)
+
+            # Additional review counts from page scraping
+            page_review_counts = self.scrape_review_counts(movie_soup)
+            if page_review_counts:
+                review_counts.update(page_review_counts)
+
             if review_counts:
                 ratings['review_counts'] = review_counts
-            
+
             return ratings
-            
+
         except Exception as e:
             print(f"Error scraping RT for {movie_title}: {e}")
             return None
@@ -236,77 +256,107 @@ class RatingMonitor:
             cur.execute(query, (movie_id, source, rating_type))
             return cur.fetchone()
     
-    def store_snapshot(self, movie_id, source, rating_type, rating_value, review_count=0):
-        """Store a new rating snapshot"""
+    def store_snapshot(self, movie_id, source, rating_type, rating_value, review_count=0, tmdb_id=None):
+        """Store a new rating snapshot with stable tmdb_id reference"""
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+            # Get tmdb_id if not provided
+            if not tmdb_id and movie_id:
+                cur.execute("SELECT tmdb_id FROM movies WHERE id = %s;", (movie_id,))
+                result = cur.fetchone()
+                tmdb_id = result['tmdb_id'] if result else None
+
             query = """
                 INSERT INTO rating_snapshots (
-                    movie_id, source, rating_type, rating_value, review_count
-                ) VALUES (%s, %s, %s, %s, %s)
+                    movie_id, tmdb_id, source, rating_type, rating_value, review_count
+                ) VALUES (%s, %s, %s, %s, %s, %s)
                 ON CONFLICT (movie_id, source, rating_type, snapshot_time) DO NOTHING
                 RETURNING *;
             """
-            
-            cur.execute(query, (movie_id, source, rating_type, rating_value, review_count))
+
+            cur.execute(query, (movie_id, tmdb_id, source, rating_type, rating_value, review_count))
             return cur.fetchone()
     
-    def store_daily_snapshot(self, movie_id, source, ratings, review_counts):
-        """Store daily review snapshot for trend analysis"""
+    def store_daily_snapshot(self, movie_id, source, ratings, review_counts, interval='daily', tmdb_id=None):
+        """Store review snapshot for trend analysis with stable tmdb_id reference.
+
+        Args:
+            movie_id: UUID of the movie
+            source: Rating source (e.g., 'RottenTomatoes')
+            ratings: Dict with 'tomatometer' and/or 'audience' scores
+            review_counts: Dict with 'critic_reviews' and/or 'audience_reviews'
+            interval: 'hourly' or 'daily' - determines snapshot granularity
+            tmdb_id: Stable movie identifier (fetched if not provided)
+        """
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
-            from datetime import date
-            
-            # Get yesterday's snapshot for comparison
-            yesterday_query = """
+            from datetime import datetime
+
+            # Get tmdb_id if not provided (for data safety)
+            if not tmdb_id and movie_id:
+                cur.execute("SELECT tmdb_id FROM movies WHERE id = %s;", (movie_id,))
+                result = cur.fetchone()
+                tmdb_id = result['tmdb_id'] if result else None
+
+            # Determine snapshot time based on interval
+            if interval == 'hourly':
+                time_trunc = "DATE_TRUNC('hour', NOW())"
+                prev_interval = "1 hour"
+            else:
+                time_trunc = "DATE_TRUNC('day', NOW())"
+                prev_interval = "1 day"
+
+            # Get previous snapshot for comparison
+            prev_query = f"""
                 SELECT * FROM daily_review_snapshots
                 WHERE movie_id = %s AND source = %s
-                AND snapshot_date = CURRENT_DATE - INTERVAL '1 day'
+                AND snapshot_time = {time_trunc} - INTERVAL '{prev_interval}'
                 LIMIT 1;
             """
-            cur.execute(yesterday_query, (movie_id, source))
-            yesterday = cur.fetchone()
-            
+            cur.execute(prev_query, (movie_id, source))
+            previous = cur.fetchone()
+
             # Calculate metrics
             total_reviews = review_counts.get('critic_reviews', 0) + review_counts.get('audience_reviews', 0)
-            new_reviews_today = 0
+            new_reviews = 0
             score_change = 0.0
-            
-            if yesterday:
-                new_reviews_today = total_reviews - (yesterday['total_reviews'] or 0)
-                if yesterday['critic_score'] and ratings.get('tomatometer'):
-                    score_change = ratings['tomatometer'] - yesterday['critic_score']
-            
+
+            if previous:
+                new_reviews = total_reviews - (previous['total_reviews'] or 0)
+                if previous['critic_score'] and ratings.get('tomatometer'):
+                    score_change = ratings['tomatometer'] - previous['critic_score']
+
             # Calculate velocity (reviews per day since release)
             days_query = "SELECT EXTRACT(DAY FROM NOW() - release_date)::INTEGER as days FROM movies WHERE id = %s;"
             cur.execute(days_query, (movie_id,))
             days_result = cur.fetchone()
             days_since_release = max(days_result['days'] if days_result else 1, 1)
             review_velocity = total_reviews / days_since_release
-            
-            # Store snapshot
-            insert_query = """
+
+            # Store snapshot with timestamp and tmdb_id for data safety
+            insert_query = f"""
                 INSERT INTO daily_review_snapshots (
-                    movie_id, source, snapshot_date,
+                    movie_id, tmdb_id, source, snapshot_date, snapshot_time,
                     total_reviews, new_reviews_today,
                     critic_score, audience_score,
                     review_velocity, score_change
-                ) VALUES (%s, %s, CURRENT_DATE, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (movie_id, source, snapshot_date) 
+                ) VALUES (%s, %s, %s, CURRENT_DATE, {time_trunc}, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (movie_id, source, snapshot_time)
                 DO UPDATE SET
                     total_reviews = EXCLUDED.total_reviews,
                     new_reviews_today = EXCLUDED.new_reviews_today,
                     critic_score = EXCLUDED.critic_score,
                     audience_score = EXCLUDED.audience_score,
                     review_velocity = EXCLUDED.review_velocity,
-                    score_change = EXCLUDED.score_change
+                    score_change = EXCLUDED.score_change,
+                    tmdb_id = COALESCE(EXCLUDED.tmdb_id, daily_review_snapshots.tmdb_id)
                 RETURNING *;
             """
-            
+
             cur.execute(insert_query, (
-                movie_id, source, total_reviews, new_reviews_today,
+                movie_id, tmdb_id, source, total_reviews, new_reviews,
                 ratings.get('tomatometer'), ratings.get('audience'),
                 review_velocity, score_change
             ))
-            
+
             return cur.fetchone()
     
     def log_scrape(self, source_name, movie_id, status, error_message=None, snapshots_created=0):
@@ -319,8 +369,13 @@ class RatingMonitor:
             """
             cur.execute(query, (source_name, movie_id, status, error_message, snapshots_created))
     
-    def monitor_movie(self, movie):
-        """Monitor a single movie for rating changes from all sources"""
+    def monitor_movie(self, movie, interval='daily'):
+        """Monitor a single movie for rating changes from all sources.
+
+        Args:
+            movie: Movie dict with 'id', 'title', etc.
+            interval: 'hourly' or 'daily' - snapshot granularity
+        """
         print(f"  Monitoring: {movie['title']}")
         
         snapshots_created = 0
@@ -349,17 +404,19 @@ class RatingMonitor:
                             change = f" ({diff:+.1f})"
                         print(f"    ✅ RT {rating_type}: {rating_value}{change}")
             
-            # Store daily snapshot
+            # Store time-series snapshot
             if review_counts:
                 try:
                     daily_snapshot = self.store_daily_snapshot(
                         movie['id'],
                         'RottenTomatoes',
                         rt_ratings,
-                        review_counts
+                        review_counts,
+                        interval=interval
                     )
                     if daily_snapshot:
-                        print(f"    📊 Daily snapshot: {daily_snapshot['total_reviews']} reviews (+{daily_snapshot['new_reviews_today']} today)")
+                        label = "Hourly" if interval == 'hourly' else "Daily"
+                        print(f"    📊 {label} snapshot: {daily_snapshot['total_reviews']} reviews (+{daily_snapshot['new_reviews_today']} new)")
                 except Exception as e:
                     print(f"    ⚠️ Failed to store daily snapshot: {e}")
             
@@ -407,30 +464,39 @@ class RatingMonitor:
             
             self.log_scrape('Metacritic', movie['id'], 'success', snapshots_created=snapshots_created)
     
-    def run_once(self):
-        """Run one monitoring cycle"""
-        print(f"🔄 Starting rating monitor cycle at {datetime.now()}")
-        
+    def run_once(self, interval='daily'):
+        """Run one monitoring cycle.
+
+        Args:
+            interval: 'hourly' or 'daily' - snapshot granularity
+        """
+        print(f"🔄 Starting rating monitor cycle at {datetime.now()} (interval: {interval})")
+
         movies = self.get_active_movies(days=30)
         print(f"Found {len(movies)} active movies")
-        
+
         for movie in movies:
             try:
-                self.monitor_movie(movie)
+                self.monitor_movie(movie, interval=interval)
                 time.sleep(2)  # Rate limiting between movies
             except Exception as e:
                 print(f"  ❌ Error monitoring {movie['title']}: {e}")
                 self.log_scrape('RottenTomatoes', movie['id'], 'error', error_message=str(e))
-        
+
         print(f"✅ Cycle complete\n")
-    
-    def run_continuous(self, interval_minutes=60):
-        """Run continuous monitoring loop"""
-        print(f"🚀 Starting continuous rating monitor (interval: {interval_minutes} min)")
-        
+
+    def run_continuous(self, interval_minutes=60, snapshot_interval='daily'):
+        """Run continuous monitoring loop.
+
+        Args:
+            interval_minutes: Minutes between monitoring cycles
+            snapshot_interval: 'hourly' or 'daily' - snapshot granularity
+        """
+        print(f"🚀 Starting continuous rating monitor (cycle: {interval_minutes} min, snapshots: {snapshot_interval})")
+
         while True:
             try:
-                self.run_once()
+                self.run_once(interval=snapshot_interval)
                 print(f"⏳ Sleeping for {interval_minutes} minutes...")
                 time.sleep(interval_minutes * 60)
             except KeyboardInterrupt:
@@ -442,11 +508,18 @@ class RatingMonitor:
 
 if __name__ == "__main__":
     import sys
-    
+    import argparse
+
+    parser = argparse.ArgumentParser(description='Movie Rating Monitor')
+    parser.add_argument('--continuous', action='store_true', help='Run continuously')
+    parser.add_argument('--interval', type=int, default=60, help='Minutes between cycles (default: 60)')
+    parser.add_argument('--snapshots', choices=['hourly', 'daily'], default='daily',
+                        help='Snapshot granularity: hourly or daily (default: daily)')
+    args = parser.parse_args()
+
     monitor = RatingMonitor()
-    
-    if len(sys.argv) > 1 and sys.argv[1] == '--continuous':
-        interval = int(sys.argv[2]) if len(sys.argv) > 2 else 60
-        monitor.run_continuous(interval_minutes=interval)
+
+    if args.continuous:
+        monitor.run_continuous(interval_minutes=args.interval, snapshot_interval=args.snapshots)
     else:
-        monitor.run_once()
+        monitor.run_once(interval=args.snapshots)

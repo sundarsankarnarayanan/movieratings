@@ -5,92 +5,127 @@
 ## Languages
 
 **Primary:**
-- TypeScript 5.x - Frontend and Next.js application code
-- JavaScript/JSX - React components and utility functions
-- Python 3 - Backend scripts for data collection, scraping, and LLM integration
+- TypeScript 5 - All application code and configuration
+- TSX/JSX - React component files in `app/` and `components/`
 
 **Secondary:**
-- SQL - Database schema and queries (PostgreSQL)
-- Shell - Automation scripts for setup and deployment
+- JavaScript - PostCSS and ESLint configuration files
 
 ## Runtime
 
 **Environment:**
-- Node.js 18+ (inferred from Next.js 16.1.4)
-- Python 3.8+ (for backend services)
+- Node.js (version unspecified in project, uses ESM modules)
 
 **Package Manager:**
-- npm (Node.js packages)
-- pip (Python packages)
-- Lockfile: `web-app/package-lock.json` (present for Node), `requirements.txt` for Python
+- npm
+- Lockfile: `package-lock.json` present
 
 ## Frameworks
 
-**Core Web:**
-- Next.js 16.1.4 - Full-stack React framework with SSR
-- React 19.2.3 - UI library
+**Core:**
+- Next.js 16.1.4 - Full-stack React framework with App Router
+  - Entry point: `app/layout.tsx`
+  - Pages: `app/page.tsx` (home), `app/movies/[id]/page.tsx` (detail)
 
-**Testing:**
-- Not detected in current dependencies
+**UI & Styling:**
+- React 19.2.3 - Component library
+- React DOM 19.2.3 - DOM rendering
+- Tailwind CSS 4 - Utility-first CSS framework
+  - Config: PostCSS via `postcss.config.mjs`
 
-**Build/Dev:**
-- TypeScript 5.x - Type checking
-- ESLint 9.x - Code linting with Next.js config
-- Tailwind CSS 4.x - Utility-first CSS styling
-- PostCSS 4.x - CSS processing pipeline
+**Data Visualization:**
+- Recharts 3.7.0 - Charting library for React
+  - Used in `components/ReviewTrendChart.tsx` for line charts
 
-**Backend/Data:**
-- psycopg2-binary - Python PostgreSQL adapter
-- BeautifulSoup4 - Web scraping library
-- Requests - HTTP client for API calls
+**Icons & Utilities:**
+- Lucide React 0.562.0 - Icon library (used in components for TrendingUp, Star, Clock, Globe, etc.)
+- date-fns 4.1.0 - Date formatting and manipulation
 
-## Key Dependencies
+## Database & ORM
 
-**Critical:**
-- `@supabase/supabase-js` 2.91.0 - Supabase client (for auth/database operations via client)
-- `pg` 8.17.2 - PostgreSQL driver for Node.js backend queries
-- `recharts` 3.7.0 - React charting library for visualization
-- `lucide-react` 0.562.0 - React icon library
-- `date-fns` 4.1.0 - Date manipulation utilities
+**Database Driver:**
+- pg (node-postgres) 8.17.2 - PostgreSQL client
+  - TypeScript definitions: `@types/pg` 8.16.0
 
-**Backend Integration:**
-- `openai` - OpenAI API client for LLM summarization
-- `python-dotenv` - Environment variable management
-- `mcp[cli]` - Model Context Protocol for agent communication
+**Connection:**
+- Custom pool wrapper in `utils/db.ts`
+- Uses `Pool` from `pg` with environment-based configuration
+- Auto-sets schema to `movie_platform` on connection
+
+**No ORM detected** - Raw SQL queries used throughout application
+
+## Testing & Linting
+
+**Linting:**
+- ESLint 9 - JavaScript/TypeScript linter
+  - Config: `eslint.config.mjs` (flat config format)
+  - Extends: `eslint-config-next/core-web-vitals` and `eslint-config-next/typescript`
+  - Ignores: `.next/`, `out/`, `build/`, `next-env.d.ts`
+
+**Testing Framework:** Not detected in dependencies or configuration
+
+## Build & Development
+
+**Build Tools:**
+- Next.js built-in bundler and TypeScript compiler
+- Tailwind CSS with PostCSS compilation
+
+**Development Server:**
+- Next.js dev server (`npm run dev`)
+
+**Build Commands:**
+```bash
+npm run dev       # Start development server
+npm run build     # Build for production
+npm start         # Start production server
+npm run lint      # Run ESLint
+```
 
 ## Configuration
 
+**TypeScript:**
+- Config file: `tsconfig.json`
+- Target: ES2017
+- Strict mode enabled
+- Module resolution: bundler
+- Path alias: `@/*` maps to project root
+- JSX: react-jsx
+
+**Next.js:**
+- Config file: `next.config.ts` (minimal/empty configuration)
+- Revalidation: Dynamic routes set to `revalidate = 0` (no ISR caching)
+
 **Environment:**
-- `.env` - Root environment file for backend (database, API keys)
-- `.env.local` - Web-app frontend environment overrides
-- `.env.example` - Example configuration template
-- Environment variables required:
-  - Database: `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`
-  - External APIs: `TMDB_API_KEY`, `OPENAI_API_KEY`
-  - Supabase: `SUPABASE_URL`, `SUPABASE_KEY`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-
-**Build:**
-- `web-app/tsconfig.json` - TypeScript compilation settings (ES2017 target, strict mode enabled)
-- `web-app/next.config.ts` - Next.js configuration (currently minimal)
-- `web-app/eslint.config.mjs` - ESLint with Next.js and TypeScript rules
-- `web-app/postcss.config.mjs` - PostCSS with Tailwind CSS plugin
-
-**Path Aliases:**
-- `@/*` → `./*` (root of web-app directory for imports)
+- Development config: `.env.local`
+- Example provided: `.env.local.example`
+- Required variables: Database connection (DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD)
+- Client-side variables would use `NEXT_PUBLIC_` prefix (Supabase SDK imported but not actively used in current code)
 
 ## Platform Requirements
 
 **Development:**
-- Node.js 18+
-- npm or yarn
-- Python 3.8+
-- PostgreSQL 12+ (local or via Supabase)
-- Environment variables configured in `.env` and `.env.local`
+- Node.js runtime
+- PostgreSQL database (local or remote)
+- Port 54322 default (dev config in `.env.local`)
 
 **Production:**
-- Deployment target: Vercel (inferred from Next.js setup) or self-hosted Node.js server
-- Database: PostgreSQL instance (local or Supabase)
-- Python backend: Requires separate runtime or serverless function support
+- Node.js runtime
+- PostgreSQL database
+- Standard Next.js deployment target (Vercel recommended, but any Node.js host works)
+
+## Dependency Summary
+
+**Direct Production Dependencies:**
+- `@supabase/supabase-js` 2.91.0 - Supabase SDK (imported but not actively used in current code)
+- `date-fns` 4.1.0 - Date utilities
+- `lucide-react` 0.562.0 - Icon components
+- `next` 16.1.4 - Web framework
+- `pg` 8.17.2 - PostgreSQL driver
+- `react` 19.2.3 - UI library
+- `react-dom` 19.2.3 - DOM rendering
+- `recharts` 3.7.0 - Charting library
+
+**Total dependencies:** 8 production, 6 dev
 
 ---
 

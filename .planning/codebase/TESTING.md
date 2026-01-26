@@ -5,217 +5,191 @@
 ## Test Framework
 
 **Runner:**
-- Python: `unittest` (built-in standard library)
-- TypeScript/React: No test framework configured (not detected)
+- None configured in this codebase
+- No test framework detected (Jest, Vitest, etc. not in package.json)
+- package.json contains no test scripts
 
 **Assertion Library:**
-- Python: unittest assertions (e.g., `self.assertEqual()`, `self.assertTrue()`)
+- Not applicable - no testing framework installed
 
 **Run Commands:**
-```bash
-python -m unittest test_scraper.py              # Run specific test file
-python -m unittest discover                     # Run all tests
-# Note: No test script in package.json for TypeScript
-```
+- No test commands configured
+- Testing is not currently implemented in this Next.js web application
 
 ## Test File Organization
 
 **Location:**
-- Python tests: Co-located with root project directory (not in subdirectories)
-- Pattern: Test files named with `test_` prefix (e.g., `test_scraper.py`, `test_mcp_server.py`, `test_movie_agent.py`)
-- Files present: `/Users/sundar/Projects/MovieRatings/test_scraper.py`, `test_mcp_server.py`, `test_movie_agent.py`
+- No test files found in the codebase
+- No `__tests__`, `tests/`, or `.test.` / `.spec.` files present
+- Would need to be co-located with source files if implemented
 
 **Naming:**
-- `test_[module_name].py` pattern
-- Test methods prefixed with `test_` (e.g., `test_get_top_reviewers`, `test_get_latest_reviews`)
+- Not applicable - no convention established yet
+- Recommended pattern (based on industry standards):
+  - `ComponentName.test.tsx` for React components
+  - `module.test.ts` for utilities
+  - `page.test.tsx` for Next.js pages
 
 **Structure:**
-```
-ProjectRoot/
-├── test_scraper.py          # Tests for scrapers
-├── test_mcp_server.py       # Tests for MCP server
-├── test_movie_agent.py      # Tests for movie agent
-├── scrapers/
-│   ├── __init__.py
-│   ├── base.py             # Abstract base class
-│   └── rotten_tomatoes.py  # Implementation
-└── database.py             # Database connection class
-```
+- Would follow Next.js best practices if implemented
 
 ## Test Structure
 
 **Suite Organization:**
-```python
-# From test_scraper.py
-import unittest
-from unittest.mock import patch, MagicMock
-from scrapers.rotten_tomatoes import RottenTomatoesScraper
+- Not currently implemented
+- When implemented, suggested structure for React Testing Library:
+```typescript
+describe('MovieCard', () => {
+  describe('rendering', () => {
+    it('should display movie title', () => {
+      // test
+    });
+  });
 
-class TestRottenTomatoesScraper(unittest.TestCase):
-    def setUp(self):
-        self.scraper = RottenTomatoesScraper()
-
-    @patch('scrapers.base.BaseScraper._get_soup')
-    def test_get_top_reviewers(self, mock_get_soup):
-        # Test implementation
-        pass
-
-    @patch('scrapers.base.BaseScraper._get_soup')
-    def test_get_latest_reviews(self, mock_get_soup):
-        # Test implementation
-        pass
-
-if __name__ == '__main__':
-    unittest.main()
+  describe('interactions', () => {
+    it('should navigate to movie page on click', () => {
+      // test
+    });
+  });
+});
 ```
 
 **Patterns:**
-- Setup: `setUp(self)` method runs before each test (initializes scraper instance)
-- No teardown methods observed
-- Assertion pattern: `self.assertEqual(actual, expected)`
-- Test naming: descriptive names starting with `test_`
+- No setup/teardown patterns established
+- No mocking patterns in use
+- No assertion patterns defined
 
 ## Mocking
 
-**Framework:** `unittest.mock` (built-in Python mocking)
+**Framework:**
+- Not applicable - no testing framework configured
 
 **Patterns:**
-```python
-# From test_scraper.py - decorator-based mocking
-@patch('scrapers.base.BaseScraper._get_soup')
-def test_get_top_reviewers(self, mock_get_soup):
-    mock_html = """..."""
-    mock_get_soup.return_value = MagicMock()
-    mock_get_soup.return_value.select.return_value = [
-        MagicMock(text='John Doe', attrs={'href': '/critics/john-doe'}),
-        MagicMock(text='Jane Smith', attrs={'href': '/critics/jane-smith'})
-    ]
-
-    reviewers = self.scraper.get_top_reviewers(limit=2)
-    self.assertEqual(len(reviewers), 2)
-    self.assertEqual(reviewers[0]['name'], 'John Doe')
-```
-
-```python
-# Mock object configuration with side_effect
-mock_row.select_one.side_effect = lambda qa: {
-    'a[data-qa="movie-link"]': mock_title,
-    'span.icon--fresh, span.icon--rotten': MagicMock(),
-    'td.review-excerpt': MagicMock(text='Great movie!'),
-    'td.review-date': MagicMock(text='Jan 1, 2024')
-}.get(qa)
-```
+- Would require Jest or Vitest mocking utilities when implemented
+- Database module (`@/utils/db`) would need mocking for data-fetching tests
 
 **What to Mock:**
-- External HTTP requests (use `@patch('scrapers.base.BaseScraper._get_soup')`)
-- HTML parsing results (BeautifulSoup returns)
-- Database connections (would use mock for database.py methods)
+- Database queries (when testing async data fetching in `page.tsx` files)
+- External API calls (lucide-react icons, recharts components)
+- Next.js router/navigation
 
 **What NOT to Mock:**
-- Core business logic (scraper filtering, data mapping)
-- Assertion conditions
-- Test fixture setup
+- Component rendering logic
+- Tailwind CSS styling
+- Event handlers
 
 ## Fixtures and Factories
 
 **Test Data:**
-```python
-# From test_scraper.py - inline mock HTML
-mock_html = """
-<table>
-    <tr><td><a href="/critics/john-doe">John Doe</a></td></tr>
-    <tr><td><a href="/critics/jane-smith">Jane Smith</a></td></tr>
-</table>
-"""
+- No fixtures or factory functions currently present
+- Would be useful for:
+  - Movie objects matching the `Movie` interface
+  - Snapshot data for `ReviewTrendChart` component
+  - Trend badge status variations
+
+Example of fixture needed:
+```typescript
+// Could be created at utils/fixtures.ts
+const mockMovie = {
+  tmdb_id: 550,
+  title: 'Fight Club',
+  release_date: '1999-10-15',
+  poster_path: '/path/to/poster.jpg',
+  vote_average: 8.8,
+  region: 'US',
+  ai_summary_positive: 'Great storytelling',
+};
 ```
 
 **Location:**
-- Test data defined inline within test methods
-- No separate fixtures directory
-- No factory classes for generating test data
+- Should be at `utils/fixtures.ts` or `__fixtures__/` directory if implemented
 
 ## Coverage
 
-**Requirements:** None enforced (no coverage tool configured)
+**Requirements:**
+- No coverage requirements configured
+- No coverage reporting tools installed
 
 **View Coverage:**
-```bash
-# No coverage reporting configured
-# Would need pytest-cov or coverage.py installed
-```
+- Would use Jest/Vitest coverage commands if framework installed:
+  - `npm run test -- --coverage`
 
 ## Test Types
 
 **Unit Tests:**
-- Scope: Individual scraper methods and data extraction logic
-- Approach: Mock external dependencies (HTTP requests), assert returned data structure
-- Example: `test_get_top_reviewers()` mocks `_get_soup()`, verifies list of reviewers returned with correct fields
-- Location: `test_scraper.py`
+- Not implemented
+- Should cover:
+  - Component rendering with various props
+  - Utility functions (if any complex logic added)
+  - TrendBadge status variants
+  - MovieCard image URL generation
 
 **Integration Tests:**
-- Scope: Limited - only found in `test_movie_agent.py`, `test_mcp_server.py`
-- Not examined in detail - likely test interactions between multiple components
+- Not implemented
+- Should cover:
+  - Database queries in `getRatingSnapshots()`, `getTrendingMovies()`, etc.
+  - Page component data fetching and rendering
+  - ReviewTrendChart data transformation
 
 **E2E Tests:**
+- Not configured
 - Framework: Not used
-- No end-to-end test suite detected
+- If needed in future: Consider Playwright or Cypress
 
 ## Common Patterns
 
 **Async Testing:**
-```python
-# Async patterns not used in Python tests
-# TypeScript/React has no test configuration
-# Next.js async server functions tested implicitly through page rendering
+- Not currently tested
+- Pattern when implemented:
+```typescript
+it('should fetch and display trending movies', async () => {
+  // const result = await getTrendingMovies();
+  // expect(result).toHaveLength(20);
+});
 ```
 
 **Error Testing:**
-```python
-# Error handling not explicitly tested in observed test files
-# Pattern would follow unittest exception assertions:
-# with self.assertRaises(SomeError):
-#     function_that_raises_error()
+- Not currently tested
+- Pattern for error handling verification:
+```typescript
+it('should handle missing movie gracefully', async () => {
+  // const movie = await getMovie('nonexistent');
+  // expect(movie).toBeUndefined();
+});
 ```
 
-**Database Testing:**
-```python
-# From database.py - Connection initialization with error handling
-# Tests would typically mock the psycopg2.connect() method
-# Example pattern (not in codebase):
-# @patch('psycopg2.connect')
-# def test_database_connection(self, mock_connect):
-#     mock_connect.return_value = MagicMock()
-#     db = Database()
-#     self.assertIsNotNone(db.conn)
-```
+- Error boundary testing for React components would be needed given the error handling patterns in page components (checking for null movies)
 
-## Test Coverage Gaps
+## Critical Testing Gaps
 
-**Untested Areas:**
-- All React components (`MovieCard.tsx`, `ReviewTrendChart.tsx`, `TrendBadge.tsx`) - no test framework configured
-- All Next.js page components (no Jest/Vitest setup)
-- Database class methods (`upsert_reviewer()`, `insert_review()`, `upsert_movie()`, etc.) - no unit tests found
-- End-to-end workflows - no E2E framework
+**High Priority Areas Needing Tests:**
 
-**Priority for Testing:**
-1. Database operations (medium priority - critical path) - Currently untested
-2. React components (medium priority - UI correctness) - Currently untested
-3. Scraper edge cases (low priority - external dependencies) - Partially tested
+1. **Data Fetching Functions** - `app/movies/[id]/page.tsx`
+   - `getMovie()` - null handling when movie not found
+   - `getReviews()` - error recovery when table doesn't exist
+   - `getMovieTrend()` - null state handling
+   - `getRatingSnapshots()` - empty array fallback
 
-## Testing Best Practices Used
+2. **Component Rendering** - `components/MovieCard.tsx`
+   - Props validation (movie interface)
+   - Image URL generation with fallback
+   - Link navigation
 
-**Strengths:**
-- Test isolation: Each test method is independent with setUp
-- Mocking external dependencies (HTTP requests)
-- Descriptive test names
-- Organized test classes by feature
+3. **Chart Component** - `components/ReviewTrendChart.tsx`
+   - Empty data handling
+   - Hourly vs. daily data detection
+   - Chart data transformation
+   - Tooltip rendering with anomaly detection
 
-**Gaps:**
-- No test runner in TypeScript/React (next steps: add Jest or Vitest)
-- No CI/CD test automation detected
-- No coverage reporting configured
-- Limited assertions per test
-- No integration test patterns for database layer
+4. **Badge Component** - `components/TrendBadge.tsx`
+   - All status variants (trending_up, trending_down, sleeper_hit, stable)
+   - Confidence percentage display
+   - Label visibility toggle
+
+5. **Database Module** - `utils/db.ts`
+   - Connection pool initialization
+   - Query parameter binding
+   - Error handling
 
 ---
 

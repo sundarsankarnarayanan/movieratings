@@ -39,60 +39,59 @@ class WebScrapingReleaseTracker:
     def scrape_rt_new_releases(self):
         """Scrape new releases from Rotten Tomatoes"""
         movies = []
-        
+
         # Try opening this week page
         url = "https://www.rottentomatoes.com/browse/movies_in_theaters/"
-        
+
         try:
             response = requests.get(url, headers=self.headers, timeout=15)
             response.raise_for_status()
             soup = BeautifulSoup(response.text, 'html.parser')
-            
-            # Find movie tiles/cards
-            movie_elements = soup.select('a[href*="/m/"]')
-            
-            seen_urls = set()
+
+            # Find movie tiles using the correct selector for browse page
+            # Use search-page-media-row or tile elements, not generic /m/ links
+            movie_elements = soup.select('a[data-qa="discovery-media-list-item-title"], tile-dynamic a[href*="/m/"]')
+
+            seen_titles = set()
             for element in movie_elements[:30]:  # Get first 30 movies
                 movie_url = element.get('href', '')
-                
-                if not movie_url or movie_url in seen_urls:
+
+                if not movie_url:
                     continue
-                    
+
                 if not movie_url.startswith('http'):
                     movie_url = f"https://www.rottentomatoes.com{movie_url}"
-                
-                seen_urls.add(movie_url)
-                
-                # Extract title precisely
-                title_elem = element.select_one('[data-qa="discovery-media-list-item-title"]')
-                if title_elem:
-                    title = title_elem.text.strip()
-                else:
+
+                # Extract title
+                title = element.text.strip() if element.text else ""
+
+                if not title:
                     # Fallback to image alt
                     img = element.select_one('rt-img, img')
                     title = img.get('alt', '').strip() if img else ""
-                
+
                 # Cleanup title
                 title = re.sub(r'^\s*\d+%\s*', '', title).strip()
                 title = re.sub(r'\s+(Opened|Opens|Re-released).*$', '', title, flags=re.DOTALL | re.IGNORECASE).strip()
-                # Strip "poster image" from RT alt text
                 title = re.sub(r'\s+poster\s+image\s*$', '', title, flags=re.IGNORECASE).strip()
                 title = ' '.join(title.split())
 
                 if not title:
                     # Extract from URL
                     title = movie_url.split('/m/')[-1].replace('_', ' ').title()
-                
-                if title and len(title) > 2:
+
+                # Skip duplicates by title
+                if title and len(title) > 2 and title not in seen_titles:
+                    seen_titles.add(title)
                     movies.append({
                         'title': title,
                         'url': movie_url,
                         'source': 'RottenTomatoes'
                     })
-            
-            print(f"Found {len(movies)} movies from RT")
+
+            print(f"Found {len(movies)} unique movies from RT")
             return movies
-            
+
         except Exception as e:
             print(f"Error scraping RT: {e}")
             return []
@@ -136,6 +135,8 @@ class WebScrapingReleaseTracker:
 
     def scrape_movie_details(self, movie_url, movie_title):
         """Scrape detailed info from a movie page"""
+        import json
+
         try:
             response = requests.get(movie_url, headers=self.headers, timeout=15)
             response.raise_for_status()
@@ -148,30 +149,43 @@ class WebScrapingReleaseTracker:
             if release_elem:
                 details['release_date'] = release_elem.strip()
 
-            # Get release year for TMDB search
-            release_year = None
-            if details.get('release_date'):
+            # POSTER EXTRACTION - Multiple methods for reliability
+            poster_url = None
+
+            # Method 1: JSON-LD schema (most reliable, unique per movie)
+            for script in soup.select('script[type="application/ld+json"]'):
                 try:
-                    release_year = datetime.strptime(details['release_date'], '%b %d, %Y').year
+                    data = json.loads(script.string)
+                    if data.get('@type') == 'Movie' and data.get('image'):
+                        poster_url = data['image']
+                        print(f"    ✅ Got poster from JSON-LD")
+                        break
                 except:
                     pass
 
-            # PRIMARY: Use TMDB API for poster
-            tmdb_data = self.get_tmdb_poster(movie_title, release_year)
-            if tmdb_data:
-                details['poster_url'] = tmdb_data['poster_url']
-                details['backdrop_url'] = tmdb_data['backdrop_url']
-                details['tmdb_id'] = tmdb_data['tmdb_id']
-                print(f"    ✅ Got TMDB poster for {movie_title}")
+            # Method 2: og:image meta tag
+            if not poster_url:
+                og_image = soup.select_one('meta[property="og:image"]')
+                if og_image and og_image.get('content'):
+                    poster_url = og_image['content']
+                    print(f"    ✅ Got poster from og:image")
+
+            # Method 3: Fallback to rt-img with movie title in alt
+            if not poster_url:
+                # Look for poster image matching movie title
+                for img in soup.select('rt-img'):
+                    alt = img.get('alt', '').lower()
+                    if 'poster' in alt and movie_title.lower().split()[0] in alt:
+                        src = img.get('src') or img.get('srcset', '').split(',')[0].split(' ')[0]
+                        if src and 'flixster' in src:
+                            poster_url = src
+                            print(f"    ✅ Got poster from rt-img")
+                            break
+
+            if poster_url:
+                details['poster_url'] = poster_url
             else:
-                # FALLBACK: Try to scrape from RT (usually fails)
-                posters = soup.select('rt-img[alt*="poster"]')
-                if posters:
-                    poster = posters[0]
-                    src = poster.get('src') or poster.get('srcset')
-                    if src:
-                        details['poster_url'] = src.split(',')[0].split(' ')[0]
-                        print(f"    ⚠️ Using RT scraped poster (may be placeholder)")
+                print(f"    ⚠️ No poster found")
 
             # Try to find genre
             genre_elems = soup.select('[data-qa="movie-info-item-value"]')

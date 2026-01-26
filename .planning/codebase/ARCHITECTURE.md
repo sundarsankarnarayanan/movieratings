@@ -4,161 +4,139 @@
 
 ## Pattern Overview
 
-**Overall:** Multi-tier event-driven system with time-series data collection
+**Overall:** Full-stack monorepo with separated concerns - Next.js frontend for real-time visualization, PostgreSQL backend with Python agents for data collection and analysis.
 
 **Key Characteristics:**
-- Separation between backend agents (Python-based data collection) and frontend presentation (Next.js React)
-- Time-series snapshot model for tracking rating changes over time
-- Periodic agent-driven data collection and analysis pipeline
-- Real-time UI queries against PostgreSQL with server-side rendering
+- Server-side rendering with async data fetching (Next.js App Router)
+- Multi-agent Python backend for autonomous data collection and trend analysis
+- Time-series data storage with snapshot-based tracking
+- Real-time rating and review monitoring from external sources
 
 ## Layers
 
-**Presentation Layer:**
-- Purpose: Display movie trends, ratings, and review history to users
-- Location: `web-app/app/`, `web-app/components/`
-- Contains: Next.js page components, React UI components, client-side charts
-- Depends on: Database queries (via `@/utils/db`)
-- Used by: Web browser clients accessing `/` (home), `/movie/[id]` (detail), `/movies/[id]` (alt detail)
+**Presentation Layer (Next.js):**
+- Purpose: User-facing web application for movie trend visualization and analytics
+- Location: `/web-app/app/`, `/web-app/components/`
+- Contains: Page components (RSC), UI components (client/server), Tailwind styling
+- Depends on: PostgreSQL database via `utils/db.ts`, external image CDNs (TMDB)
+- Used by: End users via browser
 
-**Data Access Layer:**
-- Purpose: Execute SQL queries against PostgreSQL database
-- Location: `web-app/utils/db.ts`, `database.py`
-- Contains: Connection pooling, query execution, transaction management
-- Depends on: PostgreSQL connection strings and credentials
-- Used by: Page components in presentation layer, agents in collection layer
+**Server Utilities Layer:**
+- Purpose: Database connection pooling and query abstraction
+- Location: `/web-app/utils/db.ts`
+- Contains: PostgreSQL Pool configuration, query execution wrapper
+- Depends on: `pg` npm package, environment variables
+- Used by: All page components needing data
 
-**Collection & Monitoring Layer:**
-- Purpose: Periodically collect rating data and analyze trends
-- Location: `agents/` (Python agents)
-- Contains: `rating_monitor.py`, `trend_analyzer.py`, `release_tracker.py`, `reviewer_discovery.py`
-- Depends on: PostgreSQL database, web scraping (requests/BeautifulSoup), external TMDB API
-- Used by: Orchestration scripts that invoke agents periodically
+**Agent/Backend Layer (Python):**
+- Purpose: Autonomous data collection, analysis, and database population
+- Location: `/agents/`, root-level `.py` files
+- Contains: Agent orchestration, scraping, trend analysis, LLM-based summarization
+- Depends on: PostgreSQL, external APIs (TMDB, review platforms), LLM services
+- Used by: Scheduled jobs, manual pipeline execution
 
-**Scraping Layer:**
-- Purpose: Extract data from external review platforms
-- Location: `scrapers/` (Python scrapers with base class)
-- Contains: Site-specific parsers for Rotten Tomatoes, abstractable to other platforms
-- Depends on: HTTP requests, HTML parsing libraries
-- Used by: Collection layer agents
-
-**Schema & Storage:**
-- Purpose: Persist all system state and historical data
-- Location: Database schema defined in `setup_schema.sql` and `schema_v2.sql`
-- Contains: Movies, reviewers, rating_snapshots (time-series), daily_review_snapshots, review_sources, scrape_logs, materialized views
-- Depends on: PostgreSQL 13+
-- Used by: All layers read/write through this
+**Data Storage Layer:**
+- Purpose: Persistent storage of movies, ratings, reviews, trends
+- Schema: `movie_platform` PostgreSQL schema with tables: movies, rating_snapshots, reviews, reviewers, movie_trends, daily_review_snapshots
+- Accessed by: Next.js pages and Python agents via direct SQL queries
 
 ## Data Flow
 
-**Movie Rating Collection Flow:**
+**Movie Discovery & Initial Population:**
 
-1. Periodic trigger (cron job or manual invocation) launches `agents/rating_monitor.py`
-2. `RatingMonitor.get_active_movies()` queries database for movies released in last N days
-3. For each movie, `RatingMonitor.scrape_rt_rating()` makes HTTP request to Rotten Tomatoes
-4. BeautifulSoup parses HTML response, extracts critic/audience scores
-5. `RatingMonitor.insert_snapshot()` writes `rating_snapshots` record with timestamp, source, rating_value, review_count
-6. `TrendAnalyzer` periodically aggregates snapshots into `daily_review_snapshots` table
-7. Web UI queries latest snapshots and displays trending movies on `/` homepage
+1. Release Tracker Agent (`/agents/release_tracker.py`) monitors TMDB API for new movie releases
+2. Fetches movie metadata (title, poster, backdrop, ratings, overview) and stores in `movies` table
+3. Web app queries `movies` table and renders Latest Releases section
 
-**Movie Detail Page Flow:**
+**Rating Monitoring Pipeline:**
 
-1. User visits `/movie/[id]` where `[id]` is TMDB ID
-2. Server-side `getMovie()` executes parameterized query against `movies` table
-3. Server-side `getRatingHistory()` fetches all `rating_snapshots` for that movie
-4. `formatChartData()` groups snapshots by timestamp and source/rating_type
-5. Server-side `getDailySnapshots()` retrieves aggregated `daily_review_snapshots`
-6. React component `ReviewTrendChart` renders line chart with two Y-axes (reviews, score)
-7. `latestRatings` object computed from snapshots, displayed as cards
+1. Rating Monitor Agent (`/agents/rating_monitor.py`) runs periodically
+2. Queries external review platforms (Rotten Tomatoes, TMDB, etc.)
+3. Creates `rating_snapshots` entries with timestamp, rating value, source
+4. Web app renders Biggest Movers section by calculating `rating_change = current_rating - rating_24h_ago`
+
+**Trend Analysis Pipeline:**
+
+1. Trend Analyzer Agent (`/agents/trend_analyzer.py`) processes historical snapshots
+2. Computes `movie_trends` table with: trend_status, trend_confidence, review_growth_rate, spike_date, etc.
+3. Web app displays TrendBadge component with trend status and confidence on movie detail page
+
+**Daily Review Snapshots:**
+
+1. Rating data aggregated into daily summaries stored in `daily_review_snapshots`
+2. Contains: snapshot_date, total_reviews, critic_score, audience_score, review_velocity, score_change
+3. Web app displays ReviewTrendChart using this time-series data
 
 **State Management:**
 
-- State is persisted in PostgreSQL database, not in-memory
-- No client-side state management framework (Redux/Zustand)
-- Each page request queries fresh data (revalidate = 0 on all pages)
-- `TrendBadge` component receives computed status from backend (e.g., 'trending_up', 'sleeper_hit')
+- No client-side state management (all data fetched server-side)
+- Database serves as single source of truth
+- Web app with `revalidate = 0` (no caching) ensures real-time data
 
 ## Key Abstractions
 
-**RatingSnapshot:**
-- Purpose: Record a single measurement of a movie's rating at a point in time
-- Examples: `rating_snapshots` table in schema
-- Pattern: Time-series pattern - immutable records append-only, indexed by (movie_id, source, rating_type, snapshot_time)
-- Fields: movie_id, source ('RottenTomatoes', 'Metacritic', 'IMDb'), rating_type ('tomatometer', 'audience'), rating_value, review_count, snapshot_time, metadata (JSONB)
+**Query Abstraction:**
+- Purpose: Centralize database access with parameterized queries
+- Examples: `utils/db.ts`
+- Pattern: Direct SQL execution via pg Pool, scoped to `movie_platform` schema
 
-**Movie:**
-- Purpose: Core entity representing a film with metadata
-- Examples: `movies` table in schema, `Movie` type used in page queries
-- Pattern: Entity pattern with UUID primary key, TMDB ID as external identifier
-- Contains: title, release_date, genres, overview, poster_url, backdrop_url, ai_summary fields
+**Component Hierarchy:**
+- Purpose: Reusable UI elements for consistency
+- Examples: `components/MovieCard.tsx`, `components/TrendBadge.tsx`, `components/ReviewTrendChart.tsx`
+- Pattern: Typed React components with Tailwind CSS, mix of client and server components
 
-**DailyReviewSnapshot:**
-- Purpose: Pre-aggregated daily metrics for trend analysis
-- Examples: `daily_review_snapshots` table in schema_v2.sql
-- Pattern: Materialized aggregation pattern - computed nightly from `rating_snapshots`, supports fast trend queries
-- Fields: movie_id, snapshot_date, total_reviews, new_reviews_today, critic_score, audience_score, review_velocity, score_change
-
-**MovieTrend:**
-- Purpose: Computed trend classification and anomaly detection
-- Examples: `movie_trends` materialized view, `TrendBadge` component
-- Pattern: Derived data pattern - computed from historical snapshots, cached in `movie_trends` view
-- Statuses: 'trending_up', 'trending_down', 'sleeper_hit', 'stable'
+**Agent Pattern:**
+- Purpose: Autonomous, scheduled data collection and analysis
+- Examples: `agents/rating_monitor.py`, `agents/trend_analyzer.py`, `agents/release_tracker.py`
+- Pattern: Standalone Python scripts with LLM integration via `llm_client.py`, database access via `database.py`
 
 ## Entry Points
 
-**Web Application Entry:**
-- Location: `web-app/app/layout.tsx`
-- Triggers: HTTP request to Next.js server
-- Responsibilities: Root layout, font loading, metadata
+**Web Application Root:**
+- Location: `/web-app/app/layout.tsx`
+- Triggers: Browser request to web-app domain
+- Responsibilities: Root layout, metadata, global font configuration
 
-**Homepage:**
-- Location: `web-app/app/page.tsx`
-- Triggers: GET `/`
-- Responsibilities: Execute `getTrendingMovies()` and `getRecentMovies()` queries, render trending movies grid (24h movers) and latest releases grid
+**Home Page:**
+- Location: `/web-app/app/page.tsx`
+- Triggers: GET /
+- Responsibilities: Fetch trending movies and recent releases, render hero + two grid sections
 
-**Movie Detail Page (Primary):**
-- Location: `web-app/app/movie/[id]/page.tsx`
-- Triggers: GET `/movie/[id]` where id = TMDB ID
-- Responsibilities: Fetch movie metadata, rating history, daily snapshots, compute latest ratings by source, render hero section with poster/backdrop, display current ratings cards, render trend chart, show rating history table
+**Movie Detail Page:**
+- Location: `/web-app/app/movies/[id]/page.tsx`
+- Triggers: GET /movies/[tmdb_id]
+- Responsibilities: Fetch movie metadata, reviews, trend data, snapshots; render detail view with charts
 
-**Movie Detail Page (Secondary):**
-- Location: `web-app/app/movies/[id]/page.tsx`
-- Triggers: GET `/movies/[id]`
-- Responsibilities: Similar to primary but fetches reviews from separate table, displays AI summaries, shows regional reviews
-
-**Rating Monitor Agent:**
-- Location: `agents/rating_monitor.py` > `RatingMonitor.run()`
-- Triggers: Scheduled execution (cron/orchestration script)
-- Responsibilities: Poll active movies, scrape current ratings from Rotten Tomatoes, insert snapshots
-
-**Trend Analyzer Agent:**
-- Location: `agents/trend_analyzer.py` > `TrendAnalyzer.run()`
-- Triggers: Scheduled execution (cron/orchestration script)
-- Responsibilities: Aggregate daily snapshots, detect anomalies, classify trends (trending_up/down), compute growth rates
+**Data Pipeline Entrypoints:**
+- `main.py`: Manual orchestration of agent execution
+- `mcp_server.py`: MCP server for Claude integration
+- `run_pipeline.sh`: Shell script to execute full data collection pipeline
 
 ## Error Handling
 
-**Strategy:** Fail-safe with logging
+**Strategy:** Graceful degradation with try-catch blocks at critical points
 
 **Patterns:**
-- Database connection failures: Graceful degradation, return empty results or "not found" page
-- Scraper errors: Log to `scrape_logs` table with status/error_message, continue with next movie
-- Missing movie data: 404-like response ("Movie not found" message on detail pages)
-- Timeout handling: BeautifulSoup parsing wraps requests in try/except, retries with backoff
+- Database query failures in page components return empty arrays or placeholder UI (e.g., "No reviews collected yet" in movie detail)
+- Agent errors logged but don't halt pipeline (e.g., `getReviews()` catches exception and returns `[]`)
+- Failed external API calls handled by agent with fallback behavior
+- Try-catch in `getRatingSnapshots()`, `getMovieTrend()`, `getReviews()` gracefully handle missing database tables
 
 ## Cross-Cutting Concerns
 
 **Logging:**
-- Backend agents log to `scrape_logs` table with source_name, status ('success'/'error'), error_message
-- Web UI has no explicit logging; errors render as empty UI sections (e.g., "No trend data available yet")
+- Python: Console output in agents, database.py log queries
+- Next.js: Server-side console logs via Next.js CLI
 
 **Validation:**
-- Database schema enforces NOT NULL constraints, UNIQUE constraints on external IDs (tmdb_id, profile_url)
-- Frontend TypeScript interfaces (e.g., `DailySnapshot`, `TrendBadgeProps`) provide compile-time type safety
+- Database constraints via PostgreSQL schema
+- Component props typed via TypeScript interfaces
+- Environment variables required at startup (DB_HOST, DB_NAME, DB_USER, DB_PASSWORD)
 
 **Authentication:**
-- Not implemented - no user authentication, all endpoints are public read-only
-- Database credentials passed via environment variables (DB_HOST, DB_USER, DB_PASSWORD)
+- No user authentication system; single-tenant application
+- Database access secured via environment variables
+- External APIs (TMDB, Supabase) accessed via API keys in environment
 
 ---
 

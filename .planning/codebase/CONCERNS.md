@@ -4,247 +4,160 @@
 
 ## Tech Debt
 
-**Secrets in Environment Configuration:**
-- Issue: `.env` file contains hardcoded service role key (NEXT_PUBLIC_SUPABASE_ANON_KEY) that appears to be a demo/test key
-- Files: `/Users/sundar/Projects/MovieRatings/.env`
-- Impact: Exposes authentication tokens in repository. Public keys can be intercepted; service role should never be exposed to client code.
-- Fix approach: Remove all hardcoded keys from `.env`, use environment-specific secrets management. Make `.env` a template (`.env.example`) with placeholders. Use secret management service (AWS Secrets Manager, Vault, etc.) for production deployments.
+**No API Layer - Direct Database Queries in Components:**
+- Issue: Frontend components execute raw SQL queries directly. Database schema details leak into presentation layer, making refactoring dangerous and coupling UI to DB structure.
+- Files: `/Users/sundar/Projects/MovieRatings/web-app/app/page.tsx`, `/Users/sundar/Projects/MovieRatings/web-app/app/movies/[id]/page.tsx`
+- Impact: Cannot change database structure without updating frontend. SQL injection risk if parameterization breaks. Harder to test components. Schema changes require coordinated updates across multiple files.
+- Fix approach: Create API route handlers in `app/api/` that expose REST endpoints for data queries. Move all database logic to centralized API layer. Components call `/api/trending-movies` instead of `query()`.
 
-**Web Scraping Brittleness:**
-- Issue: Rotten Tomatoes scraper uses hardcoded CSS selectors (`tr[data-qa="critic-review-row"]`, `span.icon--fresh/rotten`) which are fragile to DOM changes
-- Files: `/Users/sundar/Projects/MovieRatings/scrapers/rotten_tomatoes.py` (lines 16, 45, 72)
-- Impact: Any website redesign breaks scraper. Current code has fallbacks but they're heuristic-based and unreliable (lines 48-68).
-- Fix approach: Switch to official TMDB data where possible. For other sources, implement selector versioning and automated testing. Add monitoring to detect when selectors break (unexpected null results).
+**Missing Caching Strategy:**
+- Issue: Both home page (`/`) and detail pages execute fresh queries on every render with `revalidate = 0`. No caching means every page load hits the database, causing unnecessary load.
+- Files: `/Users/sundar/Projects/MovieRatings/web-app/app/page.tsx` (line 5), `/Users/sundar/Projects/MovieRatings/web-app/app/movies/[id]/page.tsx` (line 6)
+- Impact: Database scalability bottleneck. Real-time data not needed for trending movies (24h changes are granular enough). Performance degrades with user growth.
+- Fix approach: Use Next.js `revalidate: 3600` (1 hour) for `/` since trends don't change minute-to-minute. Use `revalidate: 1800` for movie detail pages. Add ISR (Incremental Static Regeneration) to rebuild high-traffic pages periodically without cache busting.
 
-**Inconsistent Error Handling:**
-- Issue: Database connections return None on failure but code doesn't always check. Web routes have no error boundary or try-catch blocks.
-- Files: `/Users/sundar/Projects/MovieRatings/database.py` (lines 21-23, 26, 42, 51, 68, 82, 89, 95, 112), `/Users/sundar/Projects/MovieRatings/web-app/app/page.tsx` (no error handling), `/Users/sundar/Projects/MovieRatings/web-app/app/movie/[id]/page.tsx` (basic null check only, line 75)
-- Impact: Database connection failure silently fails, returns empty arrays treated as "no data". Network errors in page generation cause unhandled crashes.
-- Fix approach: Implement consistent error handling: return Result<T, Error> types. Add error boundaries in Next.js pages. Log all database failures. Provide user-facing error messages.
+**Loose Type Safety with `any` Parameters:**
+- Issue: `params?: any[]` in query function and `payload: any` in CustomTooltip allow any values. Runtime errors possible when unexpected data structures passed.
+- Files: `/Users/sundar/Projects/MovieRatings/web-app/utils/db.ts` (line 15), `/Users/sundar/Projects/MovieRatings/web-app/components/ReviewTrendChart.tsx` (line 57)
+- Impact: Silent failures when data format changes. Tooltip crashes if payload shape unexpected. No IDE hints for query parameter structure.
+- Fix approach: Define TypeScript interfaces for each query's parameter structure. Use strict typing: `query<T>(text: string, params: QueryParams): Promise<QueryResult<T>>`. Type the CustomTooltip payload explicitly based on chartData structure.
 
-**Missing Input Validation:**
-- Issue: Python database methods accept user parameters without validation (e.g., `upsert_movie`, `insert_review`)
-- Files: `/Users/sundar/Projects/MovieRatings/database.py` (lines 25-65, 41-48, 50-65)
-- Impact: Could accept malformed data (null values in required fields, SQL injection if raw queries were used)
-- Fix approach: Add Pydantic models or dataclasses to validate inputs before database operations. Add schema constraints in PostgreSQL (NOT NULL, CHECK constraints).
+**Unhandled Error Cases in Data Fetching:**
+- Issue: Multiple query functions silently catch errors and return empty arrays/null, masking database failures or connection issues.
+- Files: `/Users/sundar/Projects/MovieRatings/web-app/app/movies/[id]/page.tsx` (lines 14-26, 30-39, 41-64)
+- Impact: Users see blank sections without knowing if data failed to load or genuinely doesn't exist. No monitoring of database errors. Hard to debug issues in production.
+- Fix approach: Differentiate between "data not found" (empty array) and "query failed" (throw error or return error object). Use try/catch with specific error logging. Show user-friendly error messages when queries fail. Add observability hooks.
 
-**Weak API Key Management:**
-- Issue: TMDB and OpenAI API keys loaded from environment but no validation that they exist or are valid
-- Files: `/Users/sundar/Projects/MovieRatings/llm_client.py` (line 9), `/Users/sundar/Projects/MovieRatings/tmdb_client.py` (line 9)
-- Impact: Silent failures - APIs return errors that are logged but execution continues with empty results
-- Fix approach: Validate API keys on service initialization. Fail fast with clear error messages. Implement API key rotation detection.
+**No Input Validation on Query Parameters:**
+- Issue: Movie ID from URL params passed directly to queries without validation. `id: string` accepted as-is in database queries.
+- Files: `/Users/sundar/Projects/MovieRatings/web-app/app/movies/[id]/page.tsx` (line 66-67)
+- Impact: Invalid IDs cause unexpected query behavior. No validation that `id` is a valid integer before passing to database. Could crash if non-numeric value causes type mismatch.
+- Fix approach: Validate and sanitize all URL parameters. Parse `id` to number: `const movieId = parseInt(id, 10)`. Throw error or redirect if invalid. Use Zod or similar for schema validation.
 
----
-
-## Known Bugs
-
-**Database Connection Not Closed:**
-- Symptoms: PostgreSQL connections may leak, exceeding max connections over time
-- Files: `/Users/sundar/Projects/MovieRatings/database.py` (lines 10-23, 88-92)
-- Trigger: Multiple requests through the application; Pool in `web-app/utils/db.ts` does not show explicit close handlers
-- Workaround: Restart database service to reset connections
-- Fix: Implement connection pool management with proper cleanup. Use context managers or connection pool lifecycle management.
-
-**Review Date Parsing Inconsistency:**
-- Symptoms: Reviews with NULL review_date stored in database but UI doesn't handle missing dates well
-- Files: `/Users/sundar/Projects/MovieRatings/scrapers/rotten_tomatoes.py` (line 66), `/Users/sundar/Projects/MovieRatings/web-app/app/page.tsx` (lines 138-140)
-- Trigger: Critics without review dates in Rotten Tomatoes profiles
-- Fix: Standardize date handling - use Unix timestamps or require valid dates. Add data validation at insert.
-
-**Chart Data Type Mismatch:**
-- Symptoms: `CustomTooltip` in ReviewTrendChart uses `any` type, could fail with unexpected data structure
-- Files: `/Users/sundar/Projects/MovieRatings/web-app/components/ReviewTrendChart.tsx` (line 44)
-- Trigger: Malformed snapshot data from database
-- Fix: Implement strict TypeScript types for snapshot payloads. Use zod or similar for runtime validation.
-
----
+**Hardcoded Polling Intervals and Thresholds:**
+- Issue: Snapshot analysis uses hardcoded 24-hour windows, 7-day windows, 5σ threshold for anomalies without configuration.
+- Files: `/Users/sundar/Projects/MovieRatings/web-app/app/page.tsx` (lines 17, 23)
+- Impact: Cannot tune trend sensitivity without code changes. No A/B testing capability. Harder to backtest analysis against different timeframes.
+- Fix approach: Move thresholds to environment variables or database configuration table. Allow querying trends with variable time windows. Document why specific intervals were chosen.
 
 ## Security Considerations
 
-**Web Scraping Without Rate Limiting:**
-- Risk: Scraper makes unlimited requests to external websites, could trigger IP blocks or legal issues
-- Files: `/Users/sundar/Projects/MovieRatings/scrapers/base.py` (lines 20-26), `/Users/sundar/Projects/MovieRatings/scrapers/rotten_tomatoes.py` (lines 9, 39)
-- Current mitigation: User-Agent header present but no backoff, retry logic, or request throttling
-- Recommendations: Add `time.sleep()` between requests, implement exponential backoff, respect robots.txt, consider using API partnerships instead
+**Database Credentials in Environment Variables Without Encryption:**
+- Risk: DB_PASSWORD stored in plaintext in `.env` and `.env.local` files. Git history contains credentials in recent commits. If `.env.local` accidentally committed, credentials exposed publicly.
+- Files: `/Users/sundar/Projects/MovieRatings/.env`, `/Users/sundar/Projects/MovieRatings/web-app/.env.local`
+- Current mitigation: Files listed in `.gitignore`, but no rotation policy for compromised credentials.
+- Recommendations: Implement credential rotation mechanism. Use PostgreSQL IAM authentication instead of passwords where possible. Audit git history for exposed secrets: `git log -p | grep -i password`. Consider using a secrets manager (AWS Secrets Manager, HashiCorp Vault) in production. Regenerate all exposed credentials immediately.
 
-**SQL Injection (Low Risk but Preventable):**
-- Risk: While current code uses parameterized queries (good), dynamic query building in `list_movies` (line 97-108) could be exploited
-- Files: `/Users/sundar/Projects/MovieRatings/database.py` (lines 94-109)
-- Current mitigation: Uses `%s` parameter placeholders with `psycopg2.extras`
-- Recommendations: Migrate to ORM (SQLAlchemy) to eliminate manual SQL. Add SQL query linting to CI/CD.
+**SQL Parameterization Correct but Vulnerable to Query Logic Flaws:**
+- Risk: While using parameterized queries (`$1`, `$2`), complex queries have multiple joins that could expose unintended data. No row-level security on database queries.
+- Files: `/Users/sundar/Projects/MovieRatings/web-app/app/movies/[id]/page.tsx` (lines 9, 15-21, 45-59)
+- Current mitigation: Parameterized queries prevent SQL injection.
+- Recommendations: Implement database views with restricted column selections. Add row-level security policies if multi-tenant features added. Audit which columns are actually needed by each query and return only those.
 
-**CORS/CSRF Not Enforced:**
-- Risk: Web app makes database queries from browser; no CORS headers or CSRF tokens visible
-- Files: `/Users/sundar/Projects/MovieRatings/web-app/utils/db.ts` (direct database access)
-- Current mitigation: Database is local (127.0.0.1) in development
-- Recommendations: Implement API middleware layer (Next.js API routes) instead of direct database access from client. Add CORS validation. Implement CSRF tokens if forms are added.
-
-**Credentials in Version Control:**
-- Risk: `.env` file committed with test credentials
-- Files: `/Users/sundar/Projects/MovieRatings/.env`
-- Current mitigation: Only demo/test keys, not production credentials
-- Recommendations: Add `.env` to `.gitignore` immediately. Audit git history for any real credentials. Use `.env.example` with placeholders.
-
----
+**External Image URLs (TMDB) Not Validated:**
+- Risk: `movie.poster_url` and `movie.backdrop_url` rendered directly in `<img src>` without validation. TMDB image URLs could be exploited if TMDB CDN compromised or URL field poisoned.
+- Files: `/Users/sundar/Projects/MovieRatings/web-app/app/page.tsx` (lines 82-86), `/Users/sundar/Projects/MovieRatings/web-app/app/movies/[id]/page.tsx` (lines 84-89, 98-101)
+- Current mitigation: TMDB is trusted source.
+- Recommendations: Validate image URLs start with `https://image.tmdb.org`. Implement Content Security Policy (CSP) header to restrict image sources. Consider proxying images through your own endpoint with caching.
 
 ## Performance Bottlenecks
 
-**Unoptimized Movie List Queries:**
-- Problem: `list_movies` in database.py returns ALL matching records; no pagination
-- Files: `/Users/sundar/Projects/MovieRatings/database.py` (lines 94-109)
-- Cause: No LIMIT or OFFSET in query; could return thousands of rows
-- Improvement path: Add pagination parameters (limit, offset). Index on region, language, title for faster filtering.
+**N+1 Query Pattern in Movie Detail Page:**
+- Problem: Movie detail page executes 4 separate database queries sequentially (getMovie, getReviews, getMovieTrend, getRatingSnapshots).
+- Files: `/Users/sundar/Projects/MovieRatings/web-app/app/movies/[id]/page.tsx` (lines 68-76)
+- Cause: Each async function fetches independently rather than batching. If database latency is 100ms per query, page load is 400ms minimum just for queries.
+- Improvement path: Batch queries using Promise.all(), combine related queries using JOINs where possible, or use a data loader pattern to deduplicate identical requests.
 
-**Large Chart Re-renders:**
-- Problem: `ReviewTrendChart` re-renders all data on every prop change; no memoization
-- Files: `/Users/sundar/Projects/MovieRatings/web-app/components/ReviewTrendChart.tsx` (line 21)
-- Cause: No `React.memo()` wrapper; `formatChartData` runs on every render
-- Improvement path: Wrap component with `React.memo()`, memoize `formatChartData` with `useMemo()`, lazy load chart library
+**Inefficient Trending Query with Subquery and DISTINCT:**
+- Problem: `getTrendingMovies` uses subquery for `rating_24h_ago` which forces database to scan rating_snapshots table multiple times.
+- Files: `/Users/sundar/Projects/MovieRatings/web-app/app/page.tsx` (lines 8-27)
+- Cause: DISTINCT ON + subquery are computationally expensive. Query processes 7 days of data just to compare 24h changes.
+- Improvement path: Use window functions `LAG()` instead of subquery. Precompute trending scores in materialized view. Cache trending results for 1 hour instead of recalculating on each page load.
 
-**Full Page Revalidation:**
-- Problem: Both `page.tsx` files set `revalidate = 0` (no caching)
-- Files: `/Users/sundar/Projects/MovieRatings/web-app/app/page.tsx` (line 5), `/Users/sundar/Projects/MovieRatings/web-app/app/movie/[id]/page.tsx` (line 6)
-- Cause: Database queries run on every page load (getTrendingMovies, getRatingHistory, etc.)
-- Impact: With 100 concurrent users, 100 database queries hit simultaneously
-- Improvement path: Implement ISR (Incremental Static Regeneration) with `revalidate = 60`. Use Redis caching layer for hot queries. Implement database query timeouts.
-
-**No Connection Pooling Limits:**
-- Problem: `web-app/utils/db.ts` creates pool but doesn't show max connection configuration
-- Files: `/Users/sundar/Projects/MovieRatings/web-app/utils/db.ts` (lines 3-9)
-- Cause: Default pool size may be too small (default: 10). No connection timeout configured.
-- Improvement path: Set `max: 20`, `idleTimeoutMillis: 30000`, `connectionTimeoutMillis: 2000`
-
-**Materialized View Not Refreshing:**
-- Problem: `movie_trends` materialized view requires manual refresh via `refresh_movie_trends()` function
-- Files: `/Users/sundar/Projects/MovieRatings/schema_v2.sql` (lines 92-117)
-- Cause: No automatic refresh trigger; view becomes stale between manual refreshes
-- Improvement path: Create trigger on `rating_snapshots` INSERT/UPDATE to auto-refresh, or use regular view instead
-
----
+**No Database Indexes on Common Query Columns:**
+- Problem: Queries filter by `movie_id`, `snapshot_time`, `source`, `rating_type` but no confirmation indexes exist.
+- Files: All query functions
+- Cause: Database may do full table scans instead of index seeks, especially as dataset grows.
+- Improvement path: Ensure indexes on: `rating_snapshots(movie_id)`, `rating_snapshots(snapshot_time)`, `rating_snapshots(source)`. Monitor query execution plans. Add composite indexes for common filter combinations.
 
 ## Fragile Areas
 
-**Rotten Tomatoes Scraper:**
-- Files: `/Users/sundar/Projects/MovieRatings/scrapers/rotten_tomatoes.py`
-- Why fragile: Depends on 3 hardcoded CSS selectors that break on any DOM update. Fallback logic uses heuristics (detecting "fresh"/"rotten" in parent HTML) which is unreliable.
-- Safe modification: Add automated tests that scrape a snapshot page and verify selectors still work. Monitor selector failures and alert. Consider migrating to TMDB API only.
-- Test coverage: No test file exists for scrapers. Zero test coverage.
+**Web Scraping Dependency (Not visible in web-app, but in agents):**
+- Files: `/Users/sundar/Projects/MovieRatings/agents/` (Python scraping scripts)
+- Why fragile: HTML selectors break when TMDB, RT, IMDb update site structure. No monitoring of scraper failures. If scraper fails, no fresh data for analysis.
+- Safe modification: Add try/catch with logging around each HTML parse. Return null/empty instead of crashing. Log when selectors fail to find expected elements. Add versioning to scraper code with rollback capability.
+- Test coverage: No tests for scraper logic. Scraper failures only discovered when data doesn't appear.
 
-**LLM Summary Generation:**
-- Files: `/Users/sundar/Projects/MovieRatings/llm_client.py` (lines 16-59)
-- Why fragile: Parses unstructured text responses using string matching ("POSITIVES:" and "NEGATIVES:" literals). If OpenAI changes response format or API fails, returns generic fallback strings that obscure the error.
-- Safe modification: Implement structured output with JSON parsing. Add retry logic with exponential backoff. Log all LLM requests/responses for debugging.
-- Test coverage: Zero. No tests for prompt variations or error cases.
+**Trend Analysis Logic with Hardcoded Thresholds:**
+- Files: Trend analyzer (not in web-app, but affects data quality): unknown location based on GSD_JOURNEY.md reference
+- Why fragile: Classification logic for trending_up/trending_down/sleeper_hit uses magic numbers. If movie popularity distribution changes (e.g., more extreme spikes), thresholds become wrong.
+- Safe modification: Document why each threshold was chosen. Add configuration flags for thresholds. Run analysis with multiple threshold sets and compare results before deploying changes.
+- Test coverage: Unknown if trend classifications are tested against known scenarios.
 
-**Database Query in Server Component:**
-- Files: `/Users/sundar/Projects/MovieRatings/web-app/app/page.tsx` (lines 7-42), `/Users/sundar/Projects/MovieRatings/web-app/app/movie/[id]/page.tsx` (lines 8-56)
-- Why fragile: Direct database queries in async server components with no error handling. Column names must match exactly (if schema changes, queries silently fail and return undefined).
-- Safe modification: Create data layer functions with schema validation. Add tests that verify returned types. Implement error boundaries.
-- Test coverage: Zero. No test files for page components.
+**Chart Component Assumes Data Shape:**
+- Files: `/Users/sundar/Projects/MovieRatings/web-app/components/ReviewTrendChart.tsx`
+- Why fragile: Component assumes `snapshots` array with specific structure. If schema changes (e.g., snapshot_time → timestamp), component crashes silently.
+- Safe modification: Add runtime validation that snapshots conform to DailySnapshot interface. Add defensive checks for missing fields with fallbacks. Test with incomplete/malformed data.
+- Test coverage: No unit tests for component. Cannot verify behavior with edge cases (empty array, single data point, null values in fields).
 
----
-
-## Scaling Limits
-
-**Database Connection Pool:**
-- Current capacity: Default pool size (likely 10) across all Next.js routes
-- Limit: With 100 concurrent users, connections will be exhausted, subsequent requests queue indefinitely
-- Scaling path: Increase pool size to 30-50, add read-only replicas for SELECT queries, implement query caching
-
-**Single Database Instance:**
-- Current capacity: Single PostgreSQL instance (localhost:54322)
-- Limit: No replication, no failover. Single point of failure.
-- Scaling path: Set up primary-replica with streaming replication, implement failover with Patroni or similar
-
-**Materialized View Refresh:**
-- Current capacity: Manual refresh only, one view (movie_trends)
-- Limit: View becomes stale between refreshes; with many movies, REFRESH takes seconds (blocking writes)
-- Scaling path: Use CONCURRENT refresh option (requires UNIQUE index), or switch to regular view with indexed base tables
-
-**Web Scraping Concurrency:**
-- Current capacity: Sequential scraping (no parallelization visible in agents)
-- Limit: `movie_release_agent.py` iterates regions sequentially; scraping 1 region takes ~30s, total 6+ minutes for 12 regions
-- Scaling path: Use thread pool or async/await, implement circuit breakers for rate-limited endpoints
-
-**Large Dataset Pagination:**
-- Current capacity: No pagination in any query
-- Limit: Queries return all matching rows; first load of "all movies" could be 10,000+ records
-- Scaling path: Implement cursor-based pagination, cache hot datasets in Redis, use lazy loading in UI
-
----
-
-## Dependencies at Risk
-
-**Deprecated Web Scraping Approach:**
-- Risk: Web scraping is fragile and legally risky. Websites update layouts without notice.
-- Impact: Entire review data pipeline breaks when Rotten Tomatoes/Metacritic redesigns
-- Migration plan: Migrate to official TMDB API entirely (already used for movie metadata). Partner with Rotten Tomatoes for official data access. Use aggregator APIs (Omdb, etc.) if available.
-
-**BeautifulSoup/Requests Stack:**
-- Risk: BeautifulSoup is synchronous, blocking. No async support. Requests library doesn't have built-in retry logic.
-- Impact: Scraper can't handle timeouts gracefully; gets stuck on slow pages
-- Migration plan: Switch to `httpx` with async/await, implement `httpx.AsyncClient` with timeout and retry config. Use `Playwright` for JavaScript-heavy sites if needed.
-
-**Hardcoded Chart Library (Recharts):**
-- Risk: Recharts is large (bundle impact) and not responsive to some data shapes
-- Impact: If charting needs change significantly, requires rewrite
-- Migration plan: Consider lightweight alternative like `Chart.js` or `D3.js` for complex needs. Evaluate business requirements first.
-
----
-
-## Missing Critical Features
-
-**No Data Validation Framework:**
-- Problem: No schema validation on API inputs or database responses
-- Blocks: Can't safely add new fields to database without risking silent failures
-- Priority: High - Should implement before scaling beyond demo
-
-**No Error Logging/Monitoring:**
-- Problem: All errors print to console/stdout with no centralized logging
-- Blocks: Can't debug production issues or detect patterns
-- Priority: High - Critical for production deployment
-
-**No Rate Limiting on Scrape Jobs:**
-- Problem: Scrapers make unlimited requests to websites
-- Blocks: Can't scale beyond demo without getting IP-blocked
-- Priority: High - Required before adding more sources
-
-**No Database Backups:**
-- Problem: Single database instance with no backup mechanism visible
-- Blocks: Data loss from any failure is permanent
-- Priority: Critical - Must implement immediately
-
-**No Automated Tests:**
-- Problem: Zero test files in entire codebase
-- Blocks: Can't safely refactor or deploy changes
-- Priority: High - Should start with integration tests for critical paths
-
----
+**Metadata Object Assumptions in Detail Page:**
+- Files: `/Users/sundar/Projects/MovieRatings/web-app/app/movies/[id]/page.tsx` (lines 83-132)
+- Why fragile: Code assumes `movie` object has properties like `poster_url`, `backdrop_url`, `regions`, `overview` that may be null/undefined. Conditional checks exist but not consistently.
+- Safe modification: Create Movie type interface enforcing required vs optional fields. Use nullish coalescing (`??`) and optional chaining consistently. Add type guards before rendering.
+- Test coverage: No tests for different movie data scenarios (missing poster, no regions, partial data).
 
 ## Test Coverage Gaps
 
-**No Unit Tests:**
-- What's not tested: Database methods (`upsert_movie`, `get_movie_reviews`, etc.), LLM client, TMDB client, scraper logic
-- Files: `/Users/sundar/Projects/MovieRatings/database.py`, `/Users/sundar/Projects/MovieRatings/llm_client.py`, `/Users/sundar/Projects/MovieRatings/tmdb_client.py`, `/Users/sundar/Projects/MovieRatings/scrapers/rotten_tomatoes.py`
-- Risk: Silent failures in critical data operations. No way to catch regressions.
-- Priority: High
+**No Tests for Database Query Functions:**
+- What's not tested: `getTrendingMovies()`, `getRecentMovies()`, `getMovie()`, `getReviews()`, all database interactions
+- Files: `/Users/sundar/Projects/MovieRatings/web-app/utils/db.ts`, `/Users/sundar/Projects/MovieRatings/web-app/app/page.tsx`, `/Users/sundar/Projects/MovieRatings/web-app/app/movies/[id]/page.tsx`
+- Risk: Query bugs only discovered in production. Schema changes cause silent failures. No regression detection.
+- Priority: High - database queries are critical path to application functionality
 
-**No Integration Tests:**
-- What's not tested: End-to-end flows (scrape → database → UI), TMDB API + database, LLM summarization pipeline
-- Files: All agent files (`movie_release_agent.py`, `summarization_agent.py`), page components
-- Risk: Data corruption or loss during complex operations. No verification that UI displays correct data.
-- Priority: High
+**No Tests for React Components:**
+- What's not tested: ReviewTrendChart rendering, TrendBadge rendering, MovieCard usage, error states
+- Files: `/Users/sundar/Projects/MovieRatings/web-app/components/ReviewTrendChart.tsx`, `/Users/sundar/Projects/MovieRatings/web-app/components/TrendBadge.tsx`, `/Users/sundar/Projects/MovieRatings/web-app/components/MovieCard.tsx`
+- Risk: UI breaks silently when data changes. Props validation not verified. Visual regressions undetected.
+- Priority: Medium - affects user experience but current site is low-traffic
 
-**No E2E Tests:**
-- What's not tested: Full user journeys (view homepage, navigate to movie detail, see chart data)
-- Files: Web app (`app/page.tsx`, `app/movie/[id]/page.tsx`)
-- Risk: UI regressions ship to production. Chart rendering bugs only caught by manual testing.
-- Priority: Medium - Lower priority than unit/integration tests
+**No End-to-End Tests:**
+- What's not tested: Full page load workflow (request data → render → display). User interactions with trends page, movie details page.
+- Files: All web-app pages and components
+- Risk: Integration issues between components not caught. Broken links, missing data sections, layout shifts.
+- Priority: Medium - would catch real-world failures
 
-**No Performance Tests:**
-- What's not tested: Query performance under load, page load times, connection pool exhaustion
-- Risk: Scaling issues discovered in production, not development
-- Priority: Medium - Important once traffic scales
+**No Tests for Error Paths:**
+- What's not tested: Database connection failures, missing movies (404 scenario), query timeouts, malformed snapshots
+- Files: All data fetching functions
+- Risk: Error handling code never executed in testing. Users see unexpected errors. No observability of what went wrong.
+- Priority: High - production reliability depends on error handling
+
+## Missing Critical Features / Known Limitations
+
+**No Real-Time Updates Without Page Reload:**
+- Problem: Trending data refreshes only on page reload. Users don't see live trend changes.
+- Blocks: Real-time dashboard use case. Cannot build real-time alert system.
+
+**No Error Boundary for Component Failures:**
+- Problem: If any component crashes, entire page fails. No graceful degradation.
+- Blocks: Reliability. Cannot serve partial content if one query fails.
+
+**No Infinite Scroll or Pagination:**
+- Problem: Home page loads all trending movies at once (limited to 20, but no pagination).
+- Blocks: Scalability. UI becomes slow with hundreds of movies.
+
+**No Search or Filtering:**
+- Problem: Users cannot filter movies by genre, source, date range.
+- Blocks: Discoverability. Hard to find specific movies in large dataset.
+
+**No User Preferences or Watchlist:**
+- Problem: Each user sees same data. Cannot save favorites.
+- Blocks: Personalization features. Reduced engagement.
+
+**Incomplete Schema Handling in Frontend:**
+- Problem: Detail page tries to render `movie.regions` as array but schema may return different format.
+- Files: `/Users/sundar/Projects/MovieRatings/web-app/app/movies/[id]/page.tsx` (line 107)
+- Blocks: Consistent display of region information across all movies.
 
 ---
 
