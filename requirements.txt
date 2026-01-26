@@ -1,0 +1,7 @@
+supabase
+beautifulsoup4
+requests
+python-dotenv
+mcp[cli]
+openai
+psycopg2-binary
