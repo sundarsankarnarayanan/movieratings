@@ -1,132 +1,154 @@
 # Technology Stack
 
-**Analysis Date:** 2026-01-26
+**Analysis Date:** 2026-01-27
 
 ## Languages
 
 **Primary:**
-- TypeScript 5 - All application code and configuration
-- TSX/JSX - React component files in `app/` and `components/`
+- TypeScript 5.x - Next.js web application (`web-app/`)
+- Python 3.9+ - Backend agents, scrapers, and data pipeline (root directory)
 
 **Secondary:**
-- JavaScript - PostCSS and ESLint configuration files
+- SQL (PostgreSQL) - Database schema and stored procedures (`schema_*.sql`)
+- Bash - Orchestration scripts (`start_platform.sh`, `populate_db.sh`)
 
 ## Runtime
 
-**Environment:**
-- Node.js (version unspecified in project, uses ESM modules)
+**Frontend Environment:**
+- Node.js (version not pinned, inferred from Next.js 16)
+- npm (package manager)
+- Lockfile: `web-app/package-lock.json` present
 
-**Package Manager:**
-- npm
-- Lockfile: `package-lock.json` present
+**Backend Environment:**
+- Python 3.9+ (referenced in `start_platform.sh`)
+- pip (package manager)
+- No lockfile (only `requirements.txt`)
 
 ## Frameworks
 
-**Core:**
-- Next.js 16.1.4 - Full-stack React framework with App Router
-  - Entry point: `app/layout.tsx`
-  - Pages: `app/page.tsx` (home), `app/movies/[id]/page.tsx` (detail)
+**Web Framework:**
+- Next.js 16.1.4 - React-based SSR/SSG framework
+  - App Router pattern (uses `app/` directory)
+  - Server Components for data fetching
+  - `revalidate = 0` for real-time data
 
-**UI & Styling:**
-- React 19.2.3 - Component library
-- React DOM 19.2.3 - DOM rendering
-- Tailwind CSS 4 - Utility-first CSS framework
-  - Config: PostCSS via `postcss.config.mjs`
+**UI Framework:**
+- React 19.2.3 - UI library
+- React DOM 19.2.3 - React DOM renderer
+- Tailwind CSS 4.x - Utility-first CSS framework
+  - PostCSS integration via `@tailwindcss/postcss`
 
-**Data Visualization:**
-- Recharts 3.7.0 - Charting library for React
-  - Used in `components/ReviewTrendChart.tsx` for line charts
+**Python Framework:**
+- No web framework (Python is used for agents/scripts only)
+- MCP (Model Context Protocol) via `mcp[cli]` for AI tool server
 
-**Icons & Utilities:**
-- Lucide React 0.562.0 - Icon library (used in components for TrendingUp, Star, Clock, Globe, etc.)
-- date-fns 4.1.0 - Date formatting and manipulation
+**Testing:**
+- None detected in web-app
+- None detected in Python code
 
-## Database & ORM
+**Build/Dev:**
+- ESLint 9.x with Next.js config - Linting
+- TypeScript 5.x - Type checking
+- PostCSS - CSS processing
 
-**Database Driver:**
-- pg (node-postgres) 8.17.2 - PostgreSQL client
-  - TypeScript definitions: `@types/pg` 8.16.0
+## Key Dependencies
 
-**Connection:**
-- Custom pool wrapper in `utils/db.ts`
-- Uses `Pool` from `pg` with environment-based configuration
-- Auto-sets schema to `movie_platform` on connection
+**Frontend Critical:**
+- `@supabase/supabase-js` ^2.91.0 - Database client (via Supabase)
+- `pg` ^8.17.2 - Direct PostgreSQL client
+- `recharts` ^3.7.0 - Charting library for trend visualization
+- `lucide-react` ^0.562.0 - Icon library
+- `date-fns` ^4.1.0 - Date formatting utilities
 
-**No ORM detected** - Raw SQL queries used throughout application
-
-## Testing & Linting
-
-**Linting:**
-- ESLint 9 - JavaScript/TypeScript linter
-  - Config: `eslint.config.mjs` (flat config format)
-  - Extends: `eslint-config-next/core-web-vitals` and `eslint-config-next/typescript`
-  - Ignores: `.next/`, `out/`, `build/`, `next-env.d.ts`
-
-**Testing Framework:** Not detected in dependencies or configuration
-
-## Build & Development
-
-**Build Tools:**
-- Next.js built-in bundler and TypeScript compiler
-- Tailwind CSS with PostCSS compilation
-
-**Development Server:**
-- Next.js dev server (`npm run dev`)
-
-**Build Commands:**
-```bash
-npm run dev       # Start development server
-npm run build     # Build for production
-npm start         # Start production server
-npm run lint      # Run ESLint
-```
+**Backend Critical:**
+- `psycopg2-binary` - PostgreSQL adapter for Python
+- `beautifulsoup4` - HTML parsing for web scraping
+- `requests` - HTTP client for API/scraping
+- `openai` - OpenAI API for AI summarization
+- `supabase` - Supabase Python client
+- `python-dotenv` - Environment variable management
+- `mcp[cli]` - Model Context Protocol server
 
 ## Configuration
 
-**TypeScript:**
-- Config file: `tsconfig.json`
+**Environment Variables (Backend - `.env.example`):**
+```
+SUPABASE_URL=your_project_url
+SUPABASE_KEY=your_service_role_key
+TMDB_API_KEY=your_tmdb_api_key
+OPENAI_API_KEY=your_openai_api_key
+```
+
+**Environment Variables (Frontend - `web-app/.env.local.example`):**
+```
+NEXT_PUBLIC_SUPABASE_URL=your_project_url
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_anon_key
+```
+
+**Database Connection (used by both):**
+```
+DB_HOST=127.0.0.1
+DB_PORT=5432
+DB_NAME=postgres
+DB_USER=postgres
+DB_PASSWORD=postgres
+```
+
+**TypeScript Configuration (`web-app/tsconfig.json`):**
 - Target: ES2017
+- Module: ESNext with bundler resolution
 - Strict mode enabled
-- Module resolution: bundler
-- Path alias: `@/*` maps to project root
-- JSX: react-jsx
+- Path alias: `@/*` maps to `./*`
 
-**Next.js:**
-- Config file: `next.config.ts` (minimal/empty configuration)
-- Revalidation: Dynamic routes set to `revalidate = 0` (no ISR caching)
-
-**Environment:**
-- Development config: `.env.local`
-- Example provided: `.env.local.example`
-- Required variables: Database connection (DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD)
-- Client-side variables would use `NEXT_PUBLIC_` prefix (Supabase SDK imported but not actively used in current code)
+**Build Configuration:**
+- `web-app/next.config.ts` - Default Next.js config (no custom options)
+- `web-app/postcss.config.mjs` - Tailwind CSS via PostCSS
+- `web-app/eslint.config.mjs` - Next.js ESLint rules
 
 ## Platform Requirements
 
 **Development:**
-- Node.js runtime
-- PostgreSQL database (local or remote)
-- Port 54322 default (dev config in `.env.local`)
+- Node.js (compatible with Next.js 16)
+- Python 3.9+
+- PostgreSQL 14+ (for gen_random_uuid and advanced features)
+- macOS/Linux (shell scripts use bash)
 
 **Production:**
-- Node.js runtime
-- PostgreSQL database
-- Standard Next.js deployment target (Vercel recommended, but any Node.js host works)
+- PostgreSQL database (Supabase hosted)
+- Node.js hosting for Next.js app
+- Python runtime for background agents
 
-## Dependency Summary
+**Database:**
+- PostgreSQL with `movie_platform` schema
+- Uses UUIDs, JSONB, arrays, materialized views
+- Custom functions and triggers
 
-**Direct Production Dependencies:**
-- `@supabase/supabase-js` 2.91.0 - Supabase SDK (imported but not actively used in current code)
-- `date-fns` 4.1.0 - Date utilities
-- `lucide-react` 0.562.0 - Icon components
-- `next` 16.1.4 - Web framework
-- `pg` 8.17.2 - PostgreSQL driver
-- `react` 19.2.3 - UI library
-- `react-dom` 19.2.3 - DOM rendering
-- `recharts` 3.7.0 - Charting library
+## Scripts
 
-**Total dependencies:** 8 production, 6 dev
+**npm scripts (`web-app/package.json`):**
+```bash
+npm run dev     # Start Next.js dev server
+npm run build   # Production build
+npm run start   # Start production server
+npm run lint    # Run ESLint
+```
+
+**Shell scripts (root):**
+- `start_platform.sh` - Master startup script
+- `populate_db.sh` - Database population
+- `run_pipeline.sh` - Data pipeline runner
+
+**Python entry points:**
+- `main.py` - Scraper entry point
+- `movie_release_agent.py` - TMDB movie fetcher
+- `summarization_agent.py` - AI summarization
+- `mcp_server.py` - MCP tool server
+- `agents/rating_monitor.py` - Real-time rating monitor
+- `agents/trend_analyzer.py` - Trend analysis
+- `agents/release_tracker.py` - Release tracking
+- `agents/reviewer_discovery.py` - Reviewer discovery
+- `agents/web_scraping_tracker.py` - Web scraping tracker
 
 ---
 
-*Stack analysis: 2026-01-26*
+*Stack analysis: 2026-01-27*

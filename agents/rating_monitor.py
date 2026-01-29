@@ -256,28 +256,24 @@ class RatingMonitor:
             cur.execute(query, (movie_id, source, rating_type))
             return cur.fetchone()
     
-    def store_snapshot(self, movie_id, source, rating_type, rating_value, review_count=0, tmdb_id=None):
-        """Store a new rating snapshot with stable tmdb_id reference"""
+    def store_snapshot(self, movie_id, source, rating_type, rating_value, review_count=0):
+        """Store a new rating snapshot"""
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
-            # Get tmdb_id if not provided
-            if not tmdb_id and movie_id:
-                cur.execute("SELECT tmdb_id FROM movies WHERE id = %s;", (movie_id,))
-                result = cur.fetchone()
-                tmdb_id = result['tmdb_id'] if result else None
 
             query = """
                 INSERT INTO rating_snapshots (
-                    movie_id, tmdb_id, source, rating_type, rating_value, review_count
-                ) VALUES (%s, %s, %s, %s, %s, %s)
+                    movie_id, source, rating_type, rating_value, review_count, snapshot_time
+                ) VALUES (%s, %s, %s, %s, %s, NOW())
                 ON CONFLICT (movie_id, source, rating_type, snapshot_time) DO NOTHING
                 RETURNING *;
             """
 
-            cur.execute(query, (movie_id, tmdb_id, source, rating_type, rating_value, review_count))
+            cur.execute(query, (movie_id, source, rating_type, rating_value, review_count))
+            self.conn.commit()
             return cur.fetchone()
     
-    def store_daily_snapshot(self, movie_id, source, ratings, review_counts, interval='daily', tmdb_id=None):
-        """Store review snapshot for trend analysis with stable tmdb_id reference.
+    def store_daily_snapshot(self, movie_id, source, ratings, review_counts, interval='daily'):
+        """Store review snapshot for trend analysis.
 
         Args:
             movie_id: UUID of the movie
@@ -285,16 +281,9 @@ class RatingMonitor:
             ratings: Dict with 'tomatometer' and/or 'audience' scores
             review_counts: Dict with 'critic_reviews' and/or 'audience_reviews'
             interval: 'hourly' or 'daily' - determines snapshot granularity
-            tmdb_id: Stable movie identifier (fetched if not provided)
         """
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
             from datetime import datetime
-
-            # Get tmdb_id if not provided (for data safety)
-            if not tmdb_id and movie_id:
-                cur.execute("SELECT tmdb_id FROM movies WHERE id = %s;", (movie_id,))
-                result = cur.fetchone()
-                tmdb_id = result['tmdb_id'] if result else None
 
             # Determine snapshot time based on interval
             if interval == 'hourly':
@@ -304,10 +293,11 @@ class RatingMonitor:
                 time_trunc = "DATE_TRUNC('day', NOW())"
                 prev_interval = "1 day"
 
-            # Get previous snapshot for comparison
+            # Check previous snapshot
             prev_query = f"""
-                SELECT * FROM daily_review_snapshots
-                WHERE movie_id = %s AND source = %s
+                SELECT total_reviews, critic_score 
+                FROM daily_review_snapshots 
+                WHERE movie_id = %s AND source = %s 
                 AND snapshot_time = {time_trunc} - INTERVAL '{prev_interval}'
                 LIMIT 1;
             """
@@ -331,30 +321,25 @@ class RatingMonitor:
             days_since_release = max(days_result['days'] if days_result else 1, 1)
             review_velocity = total_reviews / days_since_release
 
-            # Store snapshot with timestamp and tmdb_id for data safety
-            insert_query = f"""
+            # Store snapshot with timestamp
+            query = f"""
                 INSERT INTO daily_review_snapshots (
-                    movie_id, tmdb_id, source, snapshot_date, snapshot_time,
+                    movie_id, source, snapshot_date, snapshot_time,
                     total_reviews, new_reviews_today,
-                    critic_score, audience_score,
-                    review_velocity, score_change
-                ) VALUES (%s, %s, %s, CURRENT_DATE, {time_trunc}, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (movie_id, source, snapshot_time)
-                DO UPDATE SET
+                    critic_score, audience_score, score_change
+                ) VALUES (%s, %s, CURRENT_DATE, {time_trunc}, %s, %s, %s, %s, %s)
+                ON CONFLICT (movie_id, source, snapshot_time) DO UPDATE SET
                     total_reviews = EXCLUDED.total_reviews,
                     new_reviews_today = EXCLUDED.new_reviews_today,
                     critic_score = EXCLUDED.critic_score,
-                    audience_score = EXCLUDED.audience_score,
-                    review_velocity = EXCLUDED.review_velocity,
-                    score_change = EXCLUDED.score_change,
-                    tmdb_id = COALESCE(EXCLUDED.tmdb_id, daily_review_snapshots.tmdb_id)
+                    audience_score = EXCLUDED.audience_score
                 RETURNING *;
             """
-
-            cur.execute(insert_query, (
-                movie_id, tmdb_id, source, total_reviews, new_reviews,
-                ratings.get('tomatometer'), ratings.get('audience'),
-                review_velocity, score_change
+            
+            cur.execute(query, (
+                movie_id, source,
+                total_reviews, new_reviews,
+                ratings.get('tomatometer'), ratings.get('audience'), score_change
             ))
 
             return cur.fetchone()
@@ -506,12 +491,71 @@ class RatingMonitor:
                 print(f"❌ Error in monitoring loop: {e}")
                 time.sleep(60)  # Wait 1 minute before retry
 
+    def get_movies_by_age(self, min_days, max_days):
+        """Get movies released within a specific age range (days)"""
+        with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+            query = """
+                SELECT * FROM movies 
+                WHERE release_date <= NOW() - INTERVAL '%s days'
+                AND release_date > NOW() - INTERVAL '%s days'
+                ORDER BY release_date DESC;
+            """
+            cur.execute(query, (min_days, max_days))
+            return cur.fetchall()
+
+    def run_adaptive(self):
+        """Run continuous monitoring with adaptive scheduling based on movie 'freshness'"""
+        print("🚀 Starting ADAPTIVE rating monitor")
+        print("   - 🔥 Hot (< 7 days): Every 30 mins")
+        print("   - 🎬 Active (7-30 days): Every 4 hours")
+        print("   - 📚 Archive (> 30 days): Every 24 hours")
+
+        cycle_count = 0
+        interval_minutes = 30 # Base heartbeat
+
+        while True:
+            try:
+                print(f"\n🔄 Cycle {cycle_count} starting at {datetime.now().strftime('%H:%M')}")
+                
+                # 1. ALWAYS scrape Hot movies (0-7 days old)
+                hot_movies = self.get_movies_by_age(0, 7)
+                print(f"   🔥 Processing {len(hot_movies)} HOT movies...")
+                for movie in hot_movies:
+                    self.monitor_movie(movie, interval='hourly')
+                
+                
+                # 2. Active Cycles (7-30 days) - Check every 4 hours (interval=8)
+                if cycle_count % 8 == 0:
+                    print("  Checking Active Movies...")
+                    active_movies = self.get_movies_by_age(7, 30)
+                    for movie in active_movies:
+                        self.monitor_movie(movie, interval='daily')
+                        
+                # 3. Archive Cycles (30-90 days) - Check every 24 hours (interval=48)
+                if cycle_count % 48 == 0:
+                    print("  Checking Archive Movies...")
+                    archive_movies = self.get_movies_by_age(30, 90)
+                    for movie in archive_movies:
+                        self.monitor_movie(movie, interval='daily')
+
+                cycle_count += 1
+                print(f"⏳ Sleeping for {interval_minutes} minutes...")
+                time.sleep(interval_minutes * 60)
+
+            except KeyboardInterrupt:
+                print("\n👋 Shutting down rating monitor")
+                break
+            except Exception as e:
+                print(f"❌ Error in monitoring loop: {e}")
+                time.sleep(60)
+
 if __name__ == "__main__":
     import sys
     import argparse
 
     parser = argparse.ArgumentParser(description='Movie Rating Monitor')
-    parser.add_argument('--continuous', action='store_true', help='Run continuously')
+    parser.add_argument('--adaptive', action='store_true', help='Run with adaptive scheduling')
+    parser.add_argument('--continuous', action='store_true', help='Run continuously (legacy mode)')
     parser.add_argument('--interval', type=int, default=60, help='Minutes between cycles (default: 60)')
     parser.add_argument('--snapshots', choices=['hourly', 'daily'], default='daily',
                         help='Snapshot granularity: hourly or daily (default: daily)')
@@ -519,7 +563,10 @@ if __name__ == "__main__":
 
     monitor = RatingMonitor()
 
-    if args.continuous:
+    if args.adaptive:
+        monitor.run_adaptive()
+    elif args.continuous:
         monitor.run_continuous(interval_minutes=args.interval, snapshot_interval=args.snapshots)
     else:
+        # Default run once
         monitor.run_once(interval=args.snapshots)

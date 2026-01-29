@@ -10,18 +10,18 @@ async function getMovie(id: string) {
     return result.rows[0];
 }
 
-async function getReviews(title: string) {
+async function getReviews(movieId: string) {
     try {
         const result = await query(
-            `SELECT r.*, rev.name as reviewer_name, rev.source as reviewer_source
-         FROM reviews r
-         JOIN reviewers rev ON r.reviewer_id = rev.id
-         WHERE r.movie_title = $1`,
-            [title]
+            `SELECT * FROM reviews 
+             WHERE movie_id = $1 
+             ORDER BY review_date DESC, created_at DESC
+             LIMIT 50`,
+            [movieId]
         );
         return result.rows || [];
-    } catch {
-        // reviews table may not exist yet
+    } catch (e) {
+        console.error("Error fetching reviews:", e);
         return [];
     }
 }
@@ -71,7 +71,7 @@ export default async function MoviePage({ params }: { params: Promise<{ id: stri
         return <div className="text-white text-center py-24">Movie not found</div>;
     }
 
-    const reviews = await getReviews(movie.title);
+    const reviews = await getReviews(movie.id);
     const trend = await getMovieTrend(movie.id);
     const snapshots = await getRatingSnapshots(movie.id);
 
@@ -218,15 +218,17 @@ export default async function MoviePage({ params }: { params: Promise<{ id: stri
                                 reviews.map((review: any) => (
                                     <div key={review.id} className="bg-gray-900 p-6 rounded-lg border border-gray-800 hover:border-gray-700 transition-colors">
                                         <div className="flex items-center justify-between mb-2">
-                                            <span className="font-bold text-gray-200">{review.reviewer_name || "Unknown Critic"}</span>
-                                            <span className={`text-sm px-2 py-0.5 rounded ${review.rating === 'Fresh' ? 'bg-green-900 text-green-300' : 'bg-red-900 text-red-300'}`}>
-                                                {review.rating}
-                                            </span>
+                                            <span className="font-bold text-gray-200">{review.author_name || "Anonymous"}</span>
+                                            {review.rating && (
+                                                <span className={`text-sm px-2 py-0.5 rounded bg-gray-800 text-gray-300 border border-gray-700`}>
+                                                    {review.rating}
+                                                </span>
+                                            )}
                                         </div>
                                         <p className="text-gray-400 text-sm leading-relaxed">"{review.content}"</p>
                                         <div className="mt-2 flex justify-between items-center text-xs text-gray-600">
-                                            <span>{review.reviewer_source}</span>
-                                            <span>{review.review_date}</span>
+                                            <span>{review.source}</span>
+                                            <span>{review.review_date ? new Date(review.review_date).toLocaleDateString() : ''}</span>
                                         </div>
                                     </div>
                                 ))

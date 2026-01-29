@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 import time
 import re
 
+
 load_dotenv()
 
 class WebScrapingReleaseTracker:
@@ -96,42 +97,7 @@ class WebScrapingReleaseTracker:
             print(f"Error scraping RT: {e}")
             return []
     
-    def get_tmdb_poster(self, movie_title, release_year=None):
-        """Get poster URL from TMDB API"""
-        if not self.tmdb_api_key:
-            return None
 
-        try:
-            # Search for movie on TMDB
-            search_url = f"{self.tmdb_base_url}/search/movie"
-            params = {
-                "api_key": self.tmdb_api_key,
-                "query": movie_title
-            }
-            if release_year:
-                params["year"] = release_year
-
-            response = requests.get(search_url, params=params, timeout=10)
-            response.raise_for_status()
-            results = response.json().get("results", [])
-
-            if results:
-                # Get first result's poster
-                poster_path = results[0].get("poster_path")
-                backdrop_path = results[0].get("backdrop_path")
-
-                poster_url = f"https://image.tmdb.org/t/p/w500{poster_path}" if poster_path else None
-                backdrop_url = f"https://image.tmdb.org/t/p/original{backdrop_path}" if backdrop_path else None
-
-                return {
-                    'poster_url': poster_url,
-                    'backdrop_url': backdrop_url,
-                    'tmdb_id': results[0].get("id")
-                }
-        except Exception as e:
-            print(f"    Error fetching TMDB poster: {e}")
-
-        return None
 
     def scrape_movie_details(self, movie_url, movie_title):
         """Scrape detailed info from a movie page"""
@@ -197,6 +163,24 @@ class WebScrapingReleaseTracker:
             if overview:
                 details['overview'] = overview.text.strip()
 
+            # Try to find "Original Language"
+            # It's usually in a list of info items. We need to find the label "Original Language" and get the value.
+            # RT struture: <li class="info-item"> <span class="label">Original Language:</span> <span class="value">English</span> </li>
+            
+            # Generic finder for info items
+            info_items = soup.select('li.info-item, .meta-row')
+            for item in info_items:
+                label = item.select_one('.label, .meta-label')
+                value = item.select_one('.value, .meta-value')
+                
+                if label and value and 'language' in label.text.lower():
+                    details['original_language'] = value.text.strip().split()[0].lower() # "English" -> "english" -> "en" (simplified)
+                    # Map common full names to codes if needed, or store full name
+                    # For consistency with schema (varchar 10), store standardized if possible
+                    lang_map = {'english': 'en', 'spanish': 'es', 'french': 'fr', 'german': 'de', 'japanese': 'ja', 'korean': 'ko', 'hindi': 'hi'}
+                    details['original_language'] = lang_map.get(details['original_language'].lower(), details['original_language'][:2])
+                    print(f"    ✅ Found Language: {details['original_language']}")
+
             return details
 
         except Exception as e:
@@ -222,35 +206,42 @@ class WebScrapingReleaseTracker:
         return datetime.now().strftime('%Y-%m-%d')
     
     def store_movie(self, movie_data):
-        """Store movie in database"""
-        with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
-            # Use TMDB ID if available, otherwise generate from hash
-            tmdb_id = movie_data.get('tmdb_id') or (abs(hash(movie_data['title'])) % 1000000)
-
-            query = """
-                INSERT INTO movies (
-                    tmdb_id, title, release_date, genres, regions,
-                    poster_url, backdrop_url, overview
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (tmdb_id) DO UPDATE SET
-                    poster_url = EXCLUDED.poster_url,
-                    backdrop_url = EXCLUDED.backdrop_url,
-                    updated_at = NOW()
-                RETURNING *;
-            """
-
-            cur.execute(query, (
-                tmdb_id,
-                movie_data['title'],
-                movie_data.get('release_date', datetime.now().strftime('%Y-%m-%d')),
-                movie_data.get('genres', []),
-                movie_data.get('regions', ['US']),
-                movie_data.get('poster_url'),
-                movie_data.get('backdrop_url'),
-                movie_data.get('overview')
-            ))
-
-            return cur.fetchone()
+        with self.conn.cursor() as cur:
+            try:
+                # Check for duplicates by slug first
+                # (Upsert via ON CONFLICT)
+                query = """
+                    INSERT INTO movies (
+                        slug, title, release_date, genres, regions,
+                        poster_url, backdrop_url, overview, original_language
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (slug) DO UPDATE SET
+                        poster_url = EXCLUDED.poster_url,
+                        backdrop_url = EXCLUDED.backdrop_url,
+                        original_language = EXCLUDED.original_language,
+                        updated_at = NOW()
+                    RETURNING *;
+                """
+                cur.execute(query, (
+                    movie_data['slug'],
+                    movie_data['title'],
+                    movie_data['release_date'],
+                    movie_data['genres'],
+                    movie_data['regions'],
+                    movie_data['poster_url'],
+                    movie_data['backdrop_url'],
+                    movie_data['overview'],
+                    movie_data['original_language']
+                ))
+                result = cur.fetchone()
+                if result:
+                    # Convert tuple to dict since we're using default cursor
+                    columns = [desc[0] for desc in cur.description]
+                    return dict(zip(columns, result))
+                return None
+            except Exception as e:
+                print(f"    ❌ DB Error: {e}")
+                return None
     
     def initialize_snapshots(self, movie_id):
         """Create initial rating snapshots"""
@@ -263,7 +254,7 @@ class WebScrapingReleaseTracker:
             """
             
             # Initialize with 0 - rating monitor will update
-            cur.execute(query, (movie_id, 'RottenTomatoes', 'tomatometer', 0.0, 0))
+            cur.execute(query, (movie_id, 'RottenTomatoes', 'critic', 0.0, 0)) # Fixed rating_type to 'critic' as default
     
     def run(self):
         """Main execution"""
@@ -288,20 +279,31 @@ class WebScrapingReleaseTracker:
             try:
                 print(f"\nProcessing: {movie['title']}")
 
-                # Scrape details (now includes TMDB lookup)
+                # Scrape details
                 details = self.scrape_movie_details(movie['url'], movie['title'])
                 time.sleep(1)  # Rate limiting
 
+                # Generate slug from URL/Title
+                slug = movie.get('slug')
+                if not slug:
+                    # Fallback if RT URL is standard /m/slug
+                    if '/m/' in movie['url']:
+                         slug = movie['url'].split('/m/')[-1].strip('/')
+                    else:
+                         # Very basic fallback slugify for non-standard URLs
+                         slug = re.sub(r'[^a-z0-9]+', '_', movie['title'].lower()).strip('_')
+                
                 # Merge data
                 movie_data = {
                     'title': movie['title'],
-                    'tmdb_id': details.get('tmdb_id'),
+                    'slug': slug,
                     'release_date': self.parse_release_date(details.get('release_date')),
                     'genres': details.get('genres', []),
                     'regions': ['US'],
                     'poster_url': details.get('poster_url'),
                     'backdrop_url': details.get('backdrop_url'),
-                    'overview': details.get('overview', f"Movie: {movie['title']}")
+                    'overview': details.get('overview', f"Movie: {movie['title']}"),
+                    'original_language': details.get('original_language', 'en')
                 }
 
                 if movie_data['poster_url']:

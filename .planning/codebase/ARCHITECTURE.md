@@ -1,143 +1,143 @@
 # Architecture
 
-**Analysis Date:** 2026-01-26
+**Analysis Date:** 2026-01-27
 
 ## Pattern Overview
 
-**Overall:** Full-stack monorepo with separated concerns - Next.js frontend for real-time visualization, PostgreSQL backend with Python agents for data collection and analysis.
+**Overall:** Multi-tier data pipeline with web dashboard
 
 **Key Characteristics:**
-- Server-side rendering with async data fetching (Next.js App Router)
-- Multi-agent Python backend for autonomous data collection and trend analysis
-- Time-series data storage with snapshot-based tracking
-- Real-time rating and review monitoring from external sources
+- Python-based data ingestion agents operating independently
+- PostgreSQL database with dedicated `movie_platform` schema
+- Next.js 16 frontend with Server Components for data fetching
+- Agent-based architecture: each agent has a single responsibility
+- Time-series data design for rating trend analysis
 
 ## Layers
 
+**Data Ingestion Layer (Python Agents):**
+- Purpose: Collect movie data from external sources
+- Location: `/Users/sundar/Projects/MovieRatings/agents/`
+- Contains: Independent Python scripts that fetch and store data
+- Depends on: External APIs (TMDB), web scraping (RT, IMDb, Metacritic), PostgreSQL
+- Used by: Database (writes data for frontend consumption)
+
+**Data Access Layer (Python):**
+- Purpose: Database abstraction for Python agents
+- Location: `/Users/sundar/Projects/MovieRatings/database.py`
+- Contains: `Database` class with CRUD operations
+- Depends on: psycopg2, PostgreSQL
+- Used by: All Python agents and scripts
+
 **Presentation Layer (Next.js):**
-- Purpose: User-facing web application for movie trend visualization and analytics
-- Location: `/web-app/app/`, `/web-app/components/`
-- Contains: Page components (RSC), UI components (client/server), Tailwind styling
-- Depends on: PostgreSQL database via `utils/db.ts`, external image CDNs (TMDB)
+- Purpose: Web dashboard for viewing movie trends
+- Location: `/Users/sundar/Projects/MovieRatings/web-app/`
+- Contains: React Server Components, pages, UI components
+- Depends on: PostgreSQL (via pg client), Recharts for visualization
 - Used by: End users via browser
 
-**Server Utilities Layer:**
-- Purpose: Database connection pooling and query abstraction
-- Location: `/web-app/utils/db.ts`
-- Contains: PostgreSQL Pool configuration, query execution wrapper
-- Depends on: `pg` npm package, environment variables
-- Used by: All page components needing data
-
-**Agent/Backend Layer (Python):**
-- Purpose: Autonomous data collection, analysis, and database population
-- Location: `/agents/`, root-level `.py` files
-- Contains: Agent orchestration, scraping, trend analysis, LLM-based summarization
-- Depends on: PostgreSQL, external APIs (TMDB, review platforms), LLM services
-- Used by: Scheduled jobs, manual pipeline execution
-
-**Data Storage Layer:**
-- Purpose: Persistent storage of movies, ratings, reviews, trends
-- Schema: `movie_platform` PostgreSQL schema with tables: movies, rating_snapshots, reviews, reviewers, movie_trends, daily_review_snapshots
-- Accessed by: Next.js pages and Python agents via direct SQL queries
+**Scraping Layer:**
+- Purpose: Web scraping utilities for review platforms
+- Location: `/Users/sundar/Projects/MovieRatings/scrapers/`
+- Contains: Base scraper class and platform-specific implementations
+- Depends on: requests, BeautifulSoup
+- Used by: Agents that need to scrape web content
 
 ## Data Flow
 
-**Movie Discovery & Initial Population:**
+**Movie Discovery Flow:**
+1. `agents/release_tracker.py` fetches new releases from TMDB API
+2. Enriches with detailed metadata via TMDB movie endpoint
+3. Stores in `movies` table with regions array
+4. Initializes empty `rating_snapshots` for each source
 
-1. Release Tracker Agent (`/agents/release_tracker.py`) monitors TMDB API for new movie releases
-2. Fetches movie metadata (title, poster, backdrop, ratings, overview) and stores in `movies` table
-3. Web app queries `movies` table and renders Latest Releases section
+**Rating Collection Flow:**
+1. `agents/rating_monitor.py` gets active movies (last 30 days)
+2. Scrapes RT, IMDb, Metacritic for each movie
+3. Compares with last snapshot, stores if changed
+4. Creates `daily_review_snapshots` for trend analysis
+5. Logs scraping activity to `scrape_logs`
 
-**Rating Monitoring Pipeline:**
+**Trend Analysis Flow:**
+1. `agents/trend_analyzer.py` reads `daily_review_snapshots`
+2. Calculates slope, detects sleeper hits, identifies anomalies
+3. Classifies trend as: `trending_up`, `trending_down`, `sleeper_hit`, `stable`
+4. Stores classification in `movie_trends` table
 
-1. Rating Monitor Agent (`/agents/rating_monitor.py`) runs periodically
-2. Queries external review platforms (Rotten Tomatoes, TMDB, etc.)
-3. Creates `rating_snapshots` entries with timestamp, rating value, source
-4. Web app renders Biggest Movers section by calculating `rating_change = current_rating - rating_24h_ago`
-
-**Trend Analysis Pipeline:**
-
-1. Trend Analyzer Agent (`/agents/trend_analyzer.py`) processes historical snapshots
-2. Computes `movie_trends` table with: trend_status, trend_confidence, review_growth_rate, spike_date, etc.
-3. Web app displays TrendBadge component with trend status and confidence on movie detail page
-
-**Daily Review Snapshots:**
-
-1. Rating data aggregated into daily summaries stored in `daily_review_snapshots`
-2. Contains: snapshot_date, total_reviews, critic_score, audience_score, review_velocity, score_change
-3. Web app displays ReviewTrendChart using this time-series data
+**Frontend Data Flow:**
+1. Server Component (`app/page.tsx`) calls `query()` from `utils/db.ts`
+2. Raw SQL queries against PostgreSQL with `movie_platform` schema
+3. Data transformed and rendered via React Server Components
+4. Charts use client component (`ReviewTrendChart.tsx`) with Recharts
 
 **State Management:**
-
-- No client-side state management (all data fetched server-side)
-- Database serves as single source of truth
-- Web app with `revalidate = 0` (no caching) ensures real-time data
+- No client-side state management library
+- Server Components fetch fresh data on each request
+- `revalidate = 0` disables caching for real-time data
 
 ## Key Abstractions
 
-**Query Abstraction:**
-- Purpose: Centralize database access with parameterized queries
-- Examples: `utils/db.ts`
-- Pattern: Direct SQL execution via pg Pool, scoped to `movie_platform` schema
-
-**Component Hierarchy:**
-- Purpose: Reusable UI elements for consistency
-- Examples: `components/MovieCard.tsx`, `components/TrendBadge.tsx`, `components/ReviewTrendChart.tsx`
-- Pattern: Typed React components with Tailwind CSS, mix of client and server components
-
 **Agent Pattern:**
-- Purpose: Autonomous, scheduled data collection and analysis
-- Examples: `agents/rating_monitor.py`, `agents/trend_analyzer.py`, `agents/release_tracker.py`
-- Pattern: Standalone Python scripts with LLM integration via `llm_client.py`, database access via `database.py`
+- Purpose: Encapsulate data collection responsibility
+- Examples: `agents/release_tracker.py`, `agents/rating_monitor.py`, `agents/trend_analyzer.py`
+- Pattern: Class with `__init__` for DB connection, domain methods, `run()` or `run_once()` entry point
+
+**BaseScraper:**
+- Purpose: Common web scraping functionality
+- Examples: `scrapers/base.py`, `scrapers/rotten_tomatoes.py`
+- Pattern: Abstract base class with `_get_soup()` helper, concrete implementations override `get_top_reviewers()` and `get_latest_reviews()`
+
+**Database Client:**
+- Purpose: PostgreSQL connection management
+- Examples: `database.py` (Python), `utils/db.ts` (TypeScript)
+- Pattern: Connection pool with automatic `search_path` to `movie_platform` schema
 
 ## Entry Points
 
-**Web Application Root:**
-- Location: `/web-app/app/layout.tsx`
-- Triggers: Browser request to web-app domain
-- Responsibilities: Root layout, metadata, global font configuration
+**Python Agents:**
+- Location: `agents/*.py` (each has `if __name__ == "__main__"`)
+- Triggers: Manual execution or `start_platform.sh`
+- Responsibilities: Data collection and analysis
 
-**Home Page:**
-- Location: `/web-app/app/page.tsx`
-- Triggers: GET /
-- Responsibilities: Fetch trending movies and recent releases, render hero + two grid sections
+**Web Application:**
+- Location: `web-app/app/page.tsx`
+- Triggers: HTTP requests to `/`
+- Responsibilities: Render homepage with trending movies, recent releases
 
 **Movie Detail Page:**
-- Location: `/web-app/app/movies/[id]/page.tsx`
-- Triggers: GET /movies/[tmdb_id]
-- Responsibilities: Fetch movie metadata, reviews, trend data, snapshots; render detail view with charts
+- Location: `web-app/app/movies/[id]/page.tsx`
+- Triggers: HTTP requests to `/movies/:tmdb_id`
+- Responsibilities: Render single movie with reviews, trends, charts
 
-**Data Pipeline Entrypoints:**
-- `main.py`: Manual orchestration of agent execution
-- `mcp_server.py`: MCP server for Claude integration
-- `run_pipeline.sh`: Shell script to execute full data collection pipeline
+**Platform Startup:**
+- Location: `/Users/sundar/Projects/MovieRatings/start_platform.sh`
+- Triggers: Manual execution
+- Responsibilities: Run data population, start web app, start continuous rating monitor
 
 ## Error Handling
 
-**Strategy:** Graceful degradation with try-catch blocks at critical points
+**Strategy:** Fail silently with logging, continue processing
 
 **Patterns:**
-- Database query failures in page components return empty arrays or placeholder UI (e.g., "No reviews collected yet" in movie detail)
-- Agent errors logged but don't halt pipeline (e.g., `getReviews()` catches exception and returns `[]`)
-- Failed external API calls handled by agent with fallback behavior
-- Try-catch in `getRatingSnapshots()`, `getMovieTrend()`, `getReviews()` gracefully handle missing database tables
+- Python agents wrap operations in try/except, log errors, continue to next item
+- Frontend uses try/catch in data fetching functions, returns empty arrays on failure
+- Database operations check for null connection before executing
+- Scraping failures logged to `scrape_logs` table with error message
 
 ## Cross-Cutting Concerns
 
-**Logging:**
-- Python: Console output in agents, database.py log queries
-- Next.js: Server-side console logs via Next.js CLI
+**Logging:** Console output via `print()` statements with emoji indicators (no structured logging)
 
-**Validation:**
-- Database constraints via PostgreSQL schema
-- Component props typed via TypeScript interfaces
-- Environment variables required at startup (DB_HOST, DB_NAME, DB_USER, DB_PASSWORD)
+**Validation:** Minimal - relies on database constraints and type checking
 
-**Authentication:**
-- No user authentication system; single-tenant application
-- Database access secured via environment variables
-- External APIs (TMDB, Supabase) accessed via API keys in environment
+**Authentication:** None - no user authentication layer
+
+**Rate Limiting:** Manual `time.sleep()` calls between requests in scraping agents
+
+**Configuration:** Environment variables loaded via `dotenv`, required vars:
+- `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`
+- `TMDB_API_KEY`
 
 ---
 
-*Architecture analysis: 2026-01-26*
+*Architecture analysis: 2026-01-27*

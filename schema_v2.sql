@@ -7,7 +7,7 @@ SET search_path TO movie_platform;
 -- 1. Movies Table (Core metadata)
 CREATE TABLE movies (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tmdb_id INTEGER UNIQUE NOT NULL,
+    slug TEXT UNIQUE NOT NULL, -- Derived from RT URL or title-year
     title TEXT NOT NULL,
     original_title TEXT,
     release_date DATE NOT NULL,
@@ -17,12 +17,15 @@ CREATE TABLE movies (
     backdrop_url TEXT,
     overview TEXT,
     runtime INTEGER,
+    original_language VARCHAR(10),
+    ai_summary_positive TEXT,
+    ai_summary_negative TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE INDEX idx_movies_release_date ON movies(release_date DESC);
-CREATE INDEX idx_movies_tmdb_id ON movies(tmdb_id);
+CREATE INDEX idx_movies_slug ON movies(slug);
 
 -- 2. Reviewers Table (Regional critic tracking)
 CREATE TABLE reviewers (
@@ -40,6 +43,25 @@ CREATE TABLE reviewers (
 CREATE INDEX idx_reviewers_platform_region ON reviewers(platform, region);
 CREATE INDEX idx_reviewers_profile_url ON reviewers(profile_url);
 
+-- 2b. Reviews (Individual text reviews/comments)
+CREATE TABLE reviews (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    movie_id UUID REFERENCES movies(id) ON DELETE CASCADE,
+    reviewer_id UUID REFERENCES reviewers(id) ON DELETE SET NULL,
+    source TEXT NOT NULL, -- 'RottenTomatoes', 'Metacritic', 'IMDb', 'TMDb'
+    author_name TEXT,
+    rating VARCHAR(50), -- Can be 'Fresh', 'Rotten', '4/5', '80', etc.
+    content TEXT,
+    language VARCHAR(10) DEFAULT 'en',
+    review_date DATE,
+    sentiment_score FLOAT, -- -1.0 to 1.0 (calculated by AI)
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(source, movie_id, author_name, review_date)
+);
+
+CREATE INDEX idx_reviews_movie ON reviews(movie_id);
+CREATE INDEX idx_reviews_language ON reviews(language);
+
 -- 3. Rating Snapshots (Time-Series Core)
 CREATE TABLE rating_snapshots (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -52,11 +74,23 @@ CREATE TABLE rating_snapshots (
     metadata JSONB, -- Store additional context (e.g., fresh/rotten counts)
     UNIQUE(movie_id, source, rating_type, snapshot_time)
 );
-
--- Critical indexes for time-series queries
-CREATE INDEX idx_snapshots_time ON rating_snapshots(snapshot_time DESC);
-CREATE INDEX idx_snapshots_movie_time ON rating_snapshots(movie_id, snapshot_time DESC);
-CREATE INDEX idx_snapshots_source ON rating_snapshots(source, snapshot_time DESC);
+-- ...
+-- 3b. Daily Snapshots (Aggregated for trends)
+CREATE TABLE daily_review_snapshots (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    movie_id UUID REFERENCES movies(id) ON DELETE CASCADE,
+    source TEXT NOT NULL,
+    snapshot_date DATE NOT NULL,
+    snapshot_time TIMESTAMPTZ NOT NULL,
+    total_reviews INTEGER DEFAULT 0,
+    new_reviews_today INTEGER DEFAULT 0,
+    critic_score FLOAT,
+    audience_score FLOAT,
+    review_velocity FLOAT,
+    score_change FLOAT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(movie_id, source, snapshot_time)
+);
 
 -- 4. Review Sources (Platform configuration)
 CREATE TABLE review_sources (
@@ -99,6 +133,13 @@ SELECT
     rs.rating_type,
     FIRST_VALUE(rs.rating_value) OVER w as current_rating,
     FIRST_VALUE(rs.rating_value) OVER w - LAG(rs.rating_value, 24) OVER w as rating_change_24h,
+    -- Consistency Score: Check if the last 3 snapshots are non-decreasing
+    (
+        CASE WHEN 
+            FIRST_VALUE(rs.rating_value) OVER w >= NTH_VALUE(rs.rating_value, 2) OVER w 
+            AND NTH_VALUE(rs.rating_value, 2) OVER w >= NTH_VALUE(rs.rating_value, 3) OVER w 
+        THEN 1.0 ELSE 0.0 END
+    ) as consistency_score,
     COUNT(*) OVER w as total_snapshots
 FROM movies m
 JOIN rating_snapshots rs ON m.id = rs.movie_id

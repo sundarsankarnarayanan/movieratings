@@ -1,199 +1,172 @@
 # Codebase Structure
 
-**Analysis Date:** 2026-01-26
+**Analysis Date:** 2026-01-27
 
 ## Directory Layout
 
 ```
 MovieRatings/
-├── web-app/                    # Next.js frontend application
-│   ├── app/                    # Next.js App Router pages
+├── agents/                    # Python data collection agents
+├── scrapers/                  # Web scraping utilities
+├── web-app/                   # Next.js frontend application
+│   ├── app/                   # App Router pages
+│   │   ├── movies/[id]/       # Dynamic movie detail route
+│   │   ├── page.tsx           # Homepage
 │   │   ├── layout.tsx         # Root layout
-│   │   ├── page.tsx           # Home page (trending + recent)
-│   │   ├── movies/[id]/       # Dynamic movie detail page
-│   │   ├── globals.css        # Global Tailwind styles
-│   │   └── favicon.ico
-│   ├── components/            # Reusable React components
-│   │   ├── MovieCard.tsx      # Movie card with rating display
-│   │   ├── ReviewTrendChart.tsx # Line chart for rating trends
-│   │   └── TrendBadge.tsx     # Status badge (trending/sleeper/stable)
-│   ├── utils/                 # Utility functions
-│   │   └── db.ts             # PostgreSQL pool and query wrapper
-│   ├── public/                # Static assets (SVG icons)
-│   ├── .next/                 # Build output (generated)
-│   ├── package.json           # npm dependencies
-│   ├── tsconfig.json          # TypeScript configuration
-│   ├── next.config.ts         # Next.js configuration
-│   ├── eslint.config.mjs      # ESLint rules
-│   └── postcss.config.mjs     # PostCSS/Tailwind config
-│
-├── agents/                     # Python data collection agents
-│   ├── release_tracker.py     # Monitor TMDB for new movie releases
-│   ├── rating_monitor.py      # Fetch current ratings from platforms
-│   ├── trend_analyzer.py      # Compute movie trend metrics
-│   ├── reviewer_discovery.py  # Find reviewers from sources
-│   └── web_scraping_tracker.py # Track scraping activity
-│
-├── scrapers/                   # Web scraping modules
-│   ├── rotten_tomatoes.py     # Rotten Tomatoes scraper
-│   ├── base.py               # Base scraper class
-│   └── __init__.py
-│
-├── Python root modules:
-│   ├── main.py               # Pipeline orchestration entry point
-│   ├── mcp_server.py         # MCP server for Claude integration
-│   ├── movie_release_agent.py # Agent for release discovery
-│   ├── database.py           # PostgreSQL connection and queries
-│   ├── llm_client.py         # LLM service client
-│   ├── summarization_agent.py # AI-powered movie summarization
-│   ├── tmdb_client.py        # TMDB API wrapper
-│   ├── apply_sql.py          # SQL migration utility
-│   └── [test files]          # Testing utilities
-│
-├── .planning/                 # GSD planning documents
-│   └── codebase/
-│       ├── ARCHITECTURE.md    # This architecture analysis
-│       └── STRUCTURE.md       # This structure guide
-│
-├── Database:
-│   └── movies.db             # SQLite (dev only, replaced by PostgreSQL in prod)
-│
-└── Configuration:
-    ├── .env                   # Environment variables (git ignored)
-    ├── .env.example          # Environment template
-    ├── schema_safe_migration.sql # Database schema
-    ├── requirements.txt       # Python dependencies
-    ├── Makefile              # Common commands
-    └── SETUP_INSTRUCTIONS.md # Setup guide
+│   │   └── globals.css        # Global styles
+│   ├── components/            # React components
+│   ├── utils/                 # Utility modules
+│   └── public/                # Static assets
+├── .planning/                 # Project planning documents
+│   └── codebase/              # Codebase analysis docs
+├── *.py                       # Root-level Python scripts
+├── *.sql                      # Database schema files
+└── *.sh                       # Shell scripts
 ```
 
 ## Directory Purposes
 
-**`web-app/app/`:**
-- Purpose: Next.js pages and routes using App Router
-- Contains: Page components (async RSC), layout, global styles
-- Key files: `layout.tsx` (root), `page.tsx` (home), `movies/[id]/page.tsx` (detail)
+**`agents/`**
+- Purpose: Data collection and analysis agents
+- Contains: Python classes that run as standalone scripts
+- Key files:
+  - `release_tracker.py`: Fetches new movie releases from TMDB
+  - `rating_monitor.py`: Scrapes ratings from RT, IMDb, Metacritic
+  - `trend_analyzer.py`: Classifies movie trends from snapshots
+  - `reviewer_discovery.py`: Builds critic database
+  - `web_scraping_tracker.py`: Additional scraping utilities
 
-**`web-app/components/`:**
-- Purpose: Reusable React UI components
-- Contains: Movie cards, charts, badges
-- Key files: `MovieCard.tsx`, `ReviewTrendChart.tsx`, `TrendBadge.tsx`
+**`scrapers/`**
+- Purpose: Reusable web scraping classes
+- Contains: Abstract base scraper and platform implementations
+- Key files:
+  - `base.py`: `BaseScraper` abstract class with `_get_soup()` helper
+  - `rotten_tomatoes.py`: RT-specific scraping logic
 
-**`web-app/utils/`:**
-- Purpose: Shared utility functions and helpers
-- Contains: Database access wrapper
-- Key files: `db.ts` (PostgreSQL Pool)
+**`web-app/`**
+- Purpose: Next.js 16 frontend application
+- Contains: App Router pages, React components, utilities
+- Key files:
+  - `app/page.tsx`: Homepage with trending movies grid
+  - `app/movies/[id]/page.tsx`: Movie detail page with charts
+  - `app/layout.tsx`: Root layout with fonts and metadata
+  - `components/MovieCard.tsx`: Reusable movie card component
+  - `components/ReviewTrendChart.tsx`: Recharts line chart (client component)
+  - `components/TrendBadge.tsx`: Status indicator badge
+  - `utils/db.ts`: PostgreSQL connection pool
 
-**`agents/`:**
-- Purpose: Autonomous Python agents for data collection and analysis
-- Contains: Separate agent modules for specific responsibilities
-- Key files: `release_tracker.py`, `rating_monitor.py`, `trend_analyzer.py`
+**Root Python Scripts:**
+- Purpose: Standalone utilities and legacy entry points
+- Key files:
+  - `database.py`: Database class for Python agent data access
+  - `tmdb_client.py`: TMDB API client class
+  - `main.py`: Legacy scraper entry point
+  - `summarization_agent.py`: AI summary generation (uses LLM)
+  - `llm_client.py`: LLM API wrapper
 
-**`scrapers/`:**
-- Purpose: Web scraping implementations for external review platforms
-- Contains: Base scraper class and platform-specific implementations
-- Key files: `base.py` (abstract), `rotten_tomatoes.py` (concrete)
+**SQL Schema Files:**
+- Purpose: Database schema definitions
+- Key files:
+  - `schema_v2.sql`: Core schema with movies, reviewers, rating_snapshots
+  - `schema_trend_analysis.sql`: Adds daily_review_snapshots, movie_trends
+  - `schema_safe_migration.sql`: Migration utilities
+  - `setup_schema.sql`: Initial setup script
+
+**Shell Scripts:**
+- Purpose: Automation and startup
+- Key files:
+  - `start_platform.sh`: Master startup script
+  - `populate_db.sh`: Initial data population
+  - `run_pipeline.sh`: Pipeline execution
 
 ## Key File Locations
 
 **Entry Points:**
-- `web-app/app/layout.tsx`: Root layout for Next.js application
-- `web-app/app/page.tsx`: Homepage showing trending and recent movies
-- `web-app/app/movies/[id]/page.tsx`: Movie detail page with full analytics
-- `main.py`: Backend pipeline orchestration
-- `mcp_server.py`: MCP integration server
+- `/Users/sundar/Projects/MovieRatings/start_platform.sh`: Platform startup
+- `/Users/sundar/Projects/MovieRatings/web-app/app/page.tsx`: Web app homepage
+- `/Users/sundar/Projects/MovieRatings/agents/rating_monitor.py`: Continuous monitoring
 
 **Configuration:**
-- `web-app/package.json`: Frontend dependencies and scripts
-- `web-app/tsconfig.json`: TypeScript compiler options with path aliases (`@/*` → root)
-- `web-app/next.config.ts`: Next.js build configuration
-- `.env`: Environment variables (DB credentials, API keys)
-- `requirements.txt`: Python dependencies
-- `schema_safe_migration.sql`: PostgreSQL schema definition
+- `/Users/sundar/Projects/MovieRatings/.env`: Environment variables (Python)
+- `/Users/sundar/Projects/MovieRatings/web-app/.env.local`: Web app environment
+- `/Users/sundar/Projects/MovieRatings/web-app/package.json`: Node dependencies
+- `/Users/sundar/Projects/MovieRatings/requirements.txt`: Python dependencies
 
 **Core Logic:**
-- `web-app/utils/db.ts`: Database connection and query execution
-- `web-app/app/page.tsx`: Data fetching for home page (trending/recent movies)
-- `web-app/app/movies/[id]/page.tsx`: Data fetching for movie detail
-- `database.py`: Python database abstraction layer
-- `llm_client.py`: LLM API integration (Claude)
-- `agents/*.py`: Data collection and analysis workflows
+- `/Users/sundar/Projects/MovieRatings/database.py`: Python DB operations
+- `/Users/sundar/Projects/MovieRatings/web-app/utils/db.ts`: TypeScript DB client
+- `/Users/sundar/Projects/MovieRatings/agents/trend_analyzer.py`: Trend classification
 
 **Testing:**
-- `test_mcp_server.py`: MCP server tests
-- `test_scraper.py`: Scraper functionality tests
-- `test_movie_agent.py`: Movie agent tests
-- `verify_scrapers.py`: Scraper verification
+- `/Users/sundar/Projects/MovieRatings/test_scraper.py`: Scraper tests
+- `/Users/sundar/Projects/MovieRatings/test_mcp_server.py`: MCP server tests
+- `/Users/sundar/Projects/MovieRatings/test_movie_agent.py`: Agent tests
 
 ## Naming Conventions
 
 **Files:**
-- Page components: `[name]/page.tsx` (Next.js convention)
-- UI Components: PascalCase (e.g., `MovieCard.tsx`, `ReviewTrendChart.tsx`)
-- Python modules: snake_case (e.g., `release_tracker.py`, `rating_monitor.py`)
-- Utilities: Descriptive names in lowercase (e.g., `db.ts`)
-- Tests: `test_*.py` prefix (e.g., `test_scraper.py`)
+- Python: `snake_case.py` (e.g., `rating_monitor.py`, `release_tracker.py`)
+- TypeScript/React: `PascalCase.tsx` for components, `camelCase.ts` for utilities
+- SQL: `snake_case.sql` (e.g., `schema_v2.sql`)
+- Shell: `snake_case.sh`
 
 **Directories:**
-- Pages: Lowercase, kebab-case for multi-word (`movies`, `[id]`)
-- Components: PascalCase plural (e.g., `components/`)
-- Agents: Plural for collection (`agents/`)
-- Utils: Lowercase plural (`utils/`)
-
-**TypeScript/React:**
-- Component names: PascalCase (e.g., `MovieCard`, `ReviewTrendChart`)
-- Interfaces: PascalCase with `Props` suffix (e.g., `MovieCardProps`, `TrendBadgeProps`)
-- Type names: PascalCase (e.g., `DailySnapshot`, `Movie`)
+- Lowercase with hyphens for web-app dirs (e.g., `web-app`)
+- Lowercase for Python packages (e.g., `agents`, `scrapers`)
 
 ## Where to Add New Code
 
-**New Feature (UI):**
-- Primary code: `web-app/app/[feature]/page.tsx` (create new route)
-- Components: `web-app/components/[ComponentName].tsx`
-- Tests: `web-app/__tests__/[feature].test.tsx` (if added)
-- Follow: Use async RSC for data fetching, Tailwind for styling, TypeScript for types
+**New Agent:**
+- Implementation: `/Users/sundar/Projects/MovieRatings/agents/`
+- Follow pattern: Class with `__init__` (DB connection), methods, `run()` entry point
+- Add `if __name__ == "__main__"` block for standalone execution
 
-**New Component:**
-- Implementation: `web-app/components/[ComponentName].tsx`
-- Props: Define TypeScript interface with `Props` suffix
-- Styling: Use Tailwind classes only (no CSS modules)
-- Example: Export as default, use PascalCase filename
+**New Web Page:**
+- Implementation: `/Users/sundar/Projects/MovieRatings/web-app/app/`
+- Use folder-based routing (e.g., `app/rankings/page.tsx` for `/rankings`)
+- Server Component by default, add `'use client'` only if needed
 
-**New Data Collection Agent:**
-- Implementation: `agents/[agent_name].py`
-- Pattern: Import from `database.py` for queries, `llm_client.py` for LLM
-- Entry: Call from `main.py` orchestration or schedule as cron job
-- Example: `agents/new_feature_agent.py` → import in `main.py` → execute in pipeline
+**New React Component:**
+- Implementation: `/Users/sundar/Projects/MovieRatings/web-app/components/`
+- Use PascalCase filename matching component name
+- Server Component unless interactivity required
 
-**Utilities/Helpers:**
-- Backend: `database.py` for DB, create helper functions there
-- Frontend: `web-app/utils/[util_name].ts` for reusable functions
-- Pattern: Export as named exports, document with JSDoc/comments
+**New Scraper:**
+- Implementation: `/Users/sundar/Projects/MovieRatings/scrapers/`
+- Extend `BaseScraper` from `base.py`
+- Implement `get_top_reviewers()` and `get_latest_reviews()`
 
-**Database Queries:**
-- Direct SQL in page components where fetching (e.g., `app/page.tsx`)
-- Abstract frequently-used queries into `database.py` functions
-- Use parameterized queries to prevent SQL injection: `$1`, `$2` placeholders
-- Wrap in try-catch for graceful error handling
+**New Database Table:**
+- Schema: Add to `/Users/sundar/Projects/MovieRatings/schema_v2.sql` or create migration file
+- Python access: Add methods to `database.py`
+- TypeScript access: Write raw SQL in page components or add to `utils/db.ts`
+
+**Utilities:**
+- Python shared helpers: Add to root level or create `utils/` directory
+- TypeScript shared helpers: `/Users/sundar/Projects/MovieRatings/web-app/utils/`
 
 ## Special Directories
 
-**`web-app/.next/`:**
-- Purpose: Next.js build output and generated files
-- Generated: Yes (via `npm run build`)
-- Committed: No (in `.gitignore`)
-
-**`web-app/node_modules/`:**
-- Purpose: npm installed dependencies
-- Generated: Yes (via `npm install`)
-- Committed: No (in `.gitignore`)
-
-**`.planning/codebase/`:**
-- Purpose: GSD analysis documents for codebase guidance
-- Contains: ARCHITECTURE.md, STRUCTURE.md, and other analysis docs
+**`.planning/`**
+- Purpose: Project planning and analysis documents
+- Generated: No (manually created)
 - Committed: Yes
-- Usage: Referenced by `/gsd:plan-phase` and `/gsd:execute-phase` commands
+
+**`web-app/.next/`**
+- Purpose: Next.js build output
+- Generated: Yes (by `npm run build` or `npm run dev`)
+- Committed: No (in .gitignore)
+
+**`web-app/node_modules/`**
+- Purpose: Node.js dependencies
+- Generated: Yes (by `npm install`)
+- Committed: No (in .gitignore)
+
+**`web-app/public/`**
+- Purpose: Static assets served at root URL
+- Generated: No
+- Committed: Yes
 
 ---
 
-*Structure analysis: 2026-01-26*
+*Structure analysis: 2026-01-27*
