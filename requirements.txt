@@ -1,4 +1,9 @@
 supabase
+psycopg2-binary
+requests
+beautifulsoup4
+python-dotenv
+pytest
 beautifulsoup4
 requests
 python-dotenv

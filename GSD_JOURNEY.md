@@ -152,6 +152,7 @@ A multi-source review tracking system with trend analysis and bot detection.
 - Added integration test (`tests/scripts/check_unset_pythonpath.sh` + `tests/test_unset_pythonpath.py`) and `make test` target to ensure the `PYTHONPATH` unset behavior. 🧪
 - Fixed bad `INSERT` in `schema_v2.sql`, applied schema via `apply_schema_v2.py`, and updated `make setup-db` to use it. 🩹
 - Verified Supabase local instance connectivity and ran `agents/web_scraping_tracker.py` successfully against the Supabase Postgres (port 54322). 🚀
+- Added CI workflow to run `make test` and `pytest` on push + PR to `master`. ✅
 
 ```bash
 # Example commands used:
