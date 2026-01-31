@@ -6,12 +6,12 @@ class TestMCPServer(unittest.TestCase):
     @patch('mcp_server.db')
     def test_list_movies(self, mock_db):
         mock_db.list_movies.return_value = [
-            {"title": "Inception", "release_date": "2010-07-16", "tmdb_id": 27205}
+            {"title": "Inception", "release_date": "2010-07-16", "slug": "inception"}
         ]
         
         result = list_movies(title="Inception")
         self.assertIn("Inception", result)
-        self.assertIn("27205", result)
+        self.assertIn("inception", result)
 
     @patch('mcp_server.db')
     def test_get_movie_reviews(self, mock_db):
@@ -19,7 +19,7 @@ class TestMCPServer(unittest.TestCase):
             {"rating": "Fresh", "content": "Masterpiece!", "reviewers": {"name": "Critic A"}}
         ]
         
-        result = get_movie_reviews(27205)
+        result = get_movie_reviews("inception")
         self.assertIn("Critic A", result)
         self.assertIn("Fresh", result)
         self.assertIn("Masterpiece", result)

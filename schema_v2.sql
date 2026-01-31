@@ -117,11 +117,12 @@ CREATE TABLE scrape_logs (
 
 CREATE INDEX idx_scrape_logs_time ON scrape_logs(scraped_at DESC);
 
--- Insert default review sources
 INSERT INTO review_sources (name, base_url, scrape_interval_minutes, rate_limit_per_minute) VALUES
-('RottenTomatoes', 'https://www.rottentomatoes.com', 60, 10),
-('Metacritic', 'https://www.metacritic.com', 120, 5),
-('IMDb', 'https://www.imdb.com', 180, 5);
+('RottenTomatoes', 'https://www.rottentomatoes.com/', 60, 10),
+('Metacritic', 'https://www.metacritic.com/', 60, 10),
+('IMDb', 'https://www.imdb.com/', 60, 10),
+('Google', 'https://www.google.com/search?q={movie}+reviews', 120, 5),
+('YouTube', 'https://www.youtube.com/results?search_query={movie}+review', 120, 5);
 
 -- Materialized view for trend calculation
 CREATE MATERIALIZED VIEW movie_trends AS

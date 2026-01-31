@@ -2,22 +2,23 @@ import Link from 'next/link';
 import { Star } from 'lucide-react';
 
 interface Movie {
-    tmdb_id: number;
+    slug: string;
     title: string;
     release_date: string;
-    poster_path: string;
+    poster_url?: string;
+    poster_path?: string;
     vote_average: number;
     region: string;
     ai_summary_positive?: string;
 }
 
 export default function MovieCard({ movie }: { movie: Movie }) {
-    const imageUrl = movie.poster_path
+    const imageUrl = movie.poster_url || (movie.poster_path
         ? `https://image.tmdb.org/t/p/w500${movie.poster_path}`
-        : 'https://via.placeholder.com/500x750?text=No+Poster';
+        : 'https://via.placeholder.com/500x750?text=No+Poster');
 
     return (
-        <Link href={`/movies/${movie.tmdb_id}`} className="group relative block overflow-hidden rounded-xl bg-gray-900 transition-all hover:scale-[1.02] hover:shadow-2xl hover:shadow-indigo-500/20">
+        <Link href={`/movies/${movie.slug}`} className="group relative block overflow-hidden rounded-xl bg-gray-900 transition-all hover:scale-[1.02] hover:shadow-2xl hover:shadow-indigo-500/20">
             <div className="aspect-[2/3] w-full overflow-hidden">
                 <img
                     src={imageUrl}

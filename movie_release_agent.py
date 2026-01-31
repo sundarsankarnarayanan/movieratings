@@ -39,23 +39,23 @@ def movie_release_agent():
             # Default scoring for trending = popularity
             trending_score = m.get("popularity", 0)
             
+            # Generate slug
+            import re
+            slug = re.sub(r'[^a-z0-9]+', '_', m.get("title", "").lower()).strip('_')
+            release_year = m.get("release_date", "0000")[:4]
+            slug = f"{slug}-{release_year}"
+            
             movie_data = {
-                "tmdb_id": m.get("id"),
+                "slug": slug,
                 "title": m.get("title"),
                 "original_title": m.get("original_title"),
                 "release_date": m.get("release_date"), # Global/Primary release date
-                "region": r['code'], # Primary region of discovery in this loop
-                "language": r['lang'],
+                "regions": [r['code']], 
+                "original_language": r['lang'],
                 "overview": m.get("overview"),
-                "vote_average": m.get("vote_average"),
-                "vote_count": m.get("vote_count"),
-                "popularity": m.get("popularity"),
-                "poster_path": m.get("poster_path"),
-                "backdrop_path": m.get("backdrop_path"),
-                "genre_ids": m.get("genre_ids"),
-                "adult": m.get("adult"),
-                "video": m.get("video"),
-                "trending_score": trending_score
+                "poster_url": f"https://image.tmdb.org/t/p/w500{m.get('poster_path')}" if m.get('poster_path') else None,
+                "backdrop_url": f"https://image.tmdb.org/t/p/original{m.get('backdrop_path')}" if m.get('backdrop_path') else None,
+                "runtime": m.get("runtime")
             }
             stored_movie = db.upsert_movie(movie_data)
             

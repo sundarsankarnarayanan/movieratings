@@ -26,7 +26,7 @@ async function getGlobalMovies() {
 async function getRisingStars() {
   // Find movies with high consistency score from our view
   const result = await query(`
-        SELECT mt.*, m.poster_url 
+        SELECT mt.*, m.poster_url, m.slug
         FROM movie_trends mt
         JOIN movies m ON mt.movie_id = m.id
         WHERE mt.consistency_score >= 1.0
@@ -41,7 +41,7 @@ async function getRisingStars() {
 async function getTrendingMovies() {
   const result = await query(`
     SELECT DISTINCT ON (m.id)
-      m.id, m.tmdb_id, m.title, m.release_date, m.poster_url,
+      m.id, m.slug, m.title, m.release_date, m.poster_url,
       rs.rating_value as current_rating,
       rs.source,
       (
@@ -111,7 +111,7 @@ export default async function Home() {
               {risingStars.map((movie: any) => (
                 <Link
                   key={movie.movie_id}
-                  href={`/movies/${movie.tmdb_id}`} // Assuming tmdb_id is available or handled by ID lookup
+                  href={`/movies/${movie.slug}`}
                   // NOTE: movie_trends view might not have tmdb_id if not selected. 
                   // Let's ensure logic works or handle safely.
                   // Actually movie_trends view does NOT have tmdb_id selected in schema_v2.sql.
@@ -155,7 +155,7 @@ export default async function Home() {
                 </h3>
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                   {group.items.map((movie: any) => (
-                    <Link key={movie.id} href={`/movies/${movie.tmdb_id}`} className="group block">
+                    <Link key={movie.id} href={`/movies/${movie.slug}`} className="group block">
                       <div className="aspect-[2/3] rounded-lg overflow-hidden mb-2 relative">
                         <img src={movie.poster_url} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" alt={movie.title} />
                         <div className="absolute bottom-0 left-0 right-0 p-2 bg-gradient-to-t from-black/80 to-transparent">
@@ -186,7 +186,7 @@ export default async function Home() {
             {trendingMovies.map((movie) => (
               <Link
                 key={movie.id}
-                href={`/movies/${movie.tmdb_id}`}
+                href={`/movies/${movie.slug}`}
                 className="group relative block overflow-hidden rounded-xl bg-gray-800/50 backdrop-blur-sm border border-gray-700 hover:border-indigo-500 transition-all hover:scale-[1.02]"
               >
                 <div className="aspect-[16/9] w-full overflow-hidden bg-gray-900">

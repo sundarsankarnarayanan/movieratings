@@ -154,7 +154,12 @@ with db.conn.cursor() as cur:
 
 **Check 2:** Run trend analyzer
 ```bash
-PYTHONPATH=/Users/sundar/Library/Python/3.9/lib/python/site-packages python3 agents/trend_analyzer.py
+# Use the project virtual environment to run scripts:
+# Activate the venv (recommended) or use the venv python directly
+# source .venv/bin/activate
+# python agents/trend_analyzer.py
+# Or directly:
+.venv/bin/python agents/trend_analyzer.py
 ```
 
 **Check 3:** Check you're on correct page

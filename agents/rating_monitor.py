@@ -181,6 +181,26 @@ class RatingMonitor:
             
             # Extract rating
             rating_elem = movie_soup.select_one('[data-testid="hero-rating-bar__aggregate-rating__score"] span')
+
+    def scrape_google_reviews(self, movie_title):
+        """Scrape Google search results for movie review snippets."""
+        try:
+            from scrapers.google import GoogleReviewScraper
+            scraper = GoogleReviewScraper()
+            return scraper.fetch_reviews(movie_title)
+        except Exception as e:
+            print(f"      Error scraping Google: {e}")
+            return None
+
+    def scrape_youtube_reviews(self, movie_title):
+        """Scrape YouTube search results for movie review video metadata."""
+        try:
+            from scrapers.youtube import YouTubeReviewScraper
+            scraper = YouTubeReviewScraper()
+            return scraper.fetch_reviews(movie_title)
+        except Exception as e:
+            print(f"      Error scraping YouTube: {e}")
+            return None
             if rating_elem:
                 score_text = rating_elem.text.strip()
                 try:
@@ -274,6 +294,30 @@ class RatingMonitor:
     
     def store_daily_snapshot(self, movie_id, source, ratings, review_counts, interval='daily'):
         """Store review snapshot for trend analysis.
+
+                    # 4. Scrape Google
+                    time.sleep(1)
+                    google_reviews = self.scrape_google_reviews(movie['title'])
+                    if google_reviews:
+                        print(f"    ✅ Google reviews scraped: {len(google_reviews)}")
+                        # Optionally, store in reviews table or aggregate as needed
+                        # for review in google_reviews:
+                        #     ...
+                        self.log_scrape('Google', movie['id'], 'success', snapshots_created=len(google_reviews))
+                    else:
+                        self.log_scrape('Google', movie['id'], 'error', error_message='No reviews found')
+
+                    # 5. Scrape YouTube
+                    time.sleep(1)
+                    youtube_reviews = self.scrape_youtube_reviews(movie['title'])
+                    if youtube_reviews:
+                        print(f"    ✅ YouTube reviews scraped: {len(youtube_reviews)}")
+                        # Optionally, store in reviews table or aggregate as needed
+                        # for review in youtube_reviews:
+                        #     ...
+                        self.log_scrape('YouTube', movie['id'], 'success', snapshots_created=len(youtube_reviews))
+                    else:
+                        self.log_scrape('YouTube', movie['id'], 'error', error_message='No reviews found')
 
         Args:
             movie_id: UUID of the movie

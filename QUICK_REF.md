@@ -3,6 +3,9 @@
 ## One-Liners
 
 ```bash
+# Create venv and install deps
+make install
+
 # Start everything
 make start
 

@@ -91,12 +91,18 @@ class ReleaseTracker:
             
             genres = [g['name'] for g in details.get('genres', [])]
             
+            # Generate slug
+            import re
+            slug = re.sub(r'[^a-z0-9]+', '_', details['title'].lower()).strip('_')
+            release_year = details.get('release_date', '0000')[:4]
+            slug = f"{slug}-{release_year}"
+
             query = """
                 INSERT INTO movies (
-                    tmdb_id, title, original_title, release_date, 
+                    slug, title, original_title, release_date, 
                     genres, regions, poster_url, backdrop_url, overview, runtime
                 ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (tmdb_id) DO UPDATE SET
+                ON CONFLICT (slug) DO UPDATE SET
                     regions = EXCLUDED.regions,
                     updated_at = NOW()
                 RETURNING *;
@@ -106,7 +112,7 @@ class ReleaseTracker:
             backdrop_url = f"https://image.tmdb.org/t/p/original{details['backdrop_path']}" if details.get('backdrop_path') else None
             
             cur.execute(query, (
-                details['id'],
+                slug,
                 details['title'],
                 details.get('original_title'),
                 details.get('release_date'),

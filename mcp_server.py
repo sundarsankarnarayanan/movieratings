@@ -22,21 +22,21 @@ def list_movies(region: str = None, language: str = None, title: str = None) -> 
     
     output = []
     for m in movies:
-        output.append(f"- {m['title']} ({m['release_date']}) [ID: {m['tmdb_id']}]")
+        output.append(f"- {m['title']} ({m['release_date']}) [Slug: {m['slug']}]")
     
     return "\n".join(output)
 
 @mcp.tool()
-def get_movie_reviews(tmdb_id: int) -> str:
+def get_movie_reviews(slug: str) -> str:
     """
-    Get all reviews and ratings for a specific movie by its TMDB ID.
+    Get all reviews and ratings for a specific movie by its slug.
     
     Args:
-        tmdb_id: The TMDB ID of the movie
+        slug: The unique slug of the movie
     """
-    reviews = db.get_movie_reviews(tmdb_id)
+    reviews = db.get_movie_reviews(slug)
     if not reviews:
-        return f"No reviews found for movie with ID {tmdb_id}."
+        return f"No reviews found for movie with slug '{slug}'."
     
     output = []
     for r in reviews:

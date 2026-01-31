@@ -1,5 +1,15 @@
 # GSD: From Idea to Working System
 
+## IMPORTANT: Single Source of Context
+
+This file (GSD_JOURNEY.md) is the **only** context and project evolution log for this repo. All LLMs, agents, and contributors must:
+
+- Update this file for all major changes (sources, schema, architecture, etc.)
+- Never create or rely on claude.md or other context files
+- Always check and update this file for context and progress
+
+This prevents context drift and ensures all contributors (human or AI) have a single, up-to-date project history and plan.
+
 ## The Ask
 "I want to track movie reviews in real-time and detect bot manipulation."
 
@@ -133,6 +143,24 @@ A multi-source review tracking system with trend analysis and bot detection.
 - **Testing/debugging**: 2 hours
 
 **Total**: ~10 hours from zero to working system
+
+---
+
+### Recent (2026-01-31)
+- Added project `venv` support and `make venv`/`make install` targets; updated `Makefile` to use `.venv/bin/python` for commands. ✅
+- Added guards in `populate_db.sh` and `start_platform.sh` to unset `PYTHONPATH` when set, and added a README troubleshooting note about `PYTHONPATH` overriding venv packages. ⚠️
+- Added integration test (`tests/scripts/check_unset_pythonpath.sh` + `tests/test_unset_pythonpath.py`) and `make test` target to ensure the `PYTHONPATH` unset behavior. 🧪
+- Fixed bad `INSERT` in `schema_v2.sql`, applied schema via `apply_schema_v2.py`, and updated `make setup-db` to use it. 🩹
+- Verified Supabase local instance connectivity and ran `agents/web_scraping_tracker.py` successfully against the Supabase Postgres (port 54322). 🚀
+
+```bash
+# Example commands used:
+make install
+make setup-db
+make populate
+make test
+```
+
 
 ---
 

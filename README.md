@@ -5,6 +5,22 @@ Tracks movie reviews from RT, IMDb, and Metacritic in real-time. Detects bot man
 
 ## Quick Start (5 minutes)
 
+### 0. Create a virtual environment & install deps
+```bash
+# Create venv and install Python + Node deps
+make install
+# Or just create the venv without installing: make venv
+```
+
+> ⚠️ Troubleshooting: If you still see errors like "No module named 'psycopg2._psycopg'", check whether `PYTHONPATH` is set in your shell environment. An externally-set `PYTHONPATH` can point to incompatible system site-packages and override the virtualenv. Run:
+>
+> ```bash
+> env | grep PYTHONPATH || true
+> # If set, either unset it in this shell: `unset PYTHONPATH`
+> # or run the script ignoring it: `PYTHONPATH= .venv/bin/python agents/web_scraping_tracker.py`
+> ```
+> 
+> The project's startup scripts now unset `PYTHONPATH` automatically to avoid this issue.
 ### 1. Setup Database
 ```bash
 # Start your Postgres (port 54322)
@@ -20,6 +36,8 @@ cp .env.example .env
 
 ### 3. Run
 ```bash
+# Use the venv to run commands (recommended):
+source .venv/bin/activate
 make start
 # Opens dashboard at http://localhost:3000
 ```

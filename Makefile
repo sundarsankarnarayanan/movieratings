@@ -1,11 +1,12 @@
 # Makefile for Real-Time Movie Review Trend Platform
 
-PYTHON = python3
-PIP = pip3
+VENV = .venv
+PYTHON = $(VENV)/bin/python
+PIP = $(VENV)/bin/pip
 NPM = npm
-PYTHONPATH_VAL = PYTHONPATH=/Users/sundar/Library/Python/3.9/lib/python/site-packages
+PYTHONPATH_VAL = 
 
-.PHONY: help install setup-db populate monitor web start clean
+.PHONY: help install venv setup-db populate monitor web start clean
 
 help:
 	@echo "Available commands:"
@@ -18,50 +19,42 @@ help:
 	@echo "  make start         - Run the full system (cleanup + populate + start all)"
 	@echo "  make clean         - Kill all processes on ports 3000 and 3001"
 
-install:
+venv:
+	@test -d $(VENV) || python3 -m venv $(VENV)
+	$(PIP) install --upgrade pip setuptools wheel
+
+install: venv
 	$(PIP) install psycopg2-binary requests beautifulsoup4 python-dotenv
 	cd web-app && $(NPM) install
 
 setup-db:
-	$(PYTHONPATH_VAL) $(PYTHON) -c "\
-	import psycopg2, os; \
-	from dotenv import load_dotenv; \
-	load_dotenv(); \
-	conn = psycopg2.connect( \
-	    host=os.environ.get('DB_HOST'), \
-	    port=os.environ.get('DB_PORT'), \
-	    database=os.environ.get('DB_NAME'), \
-	    user=os.environ.get('DB_USER'), \
-	    password=os.environ.get('DB_PASSWORD') \
-	); \
-	conn.autocommit = True; \
-	with conn.cursor() as cur: \
-	    with open('schema_v2.sql', 'r') as f: \
-	        cur.execute(f.read()); \
-	conn.close(); \
-	print('✅ Database schema initialized.')"
+	$(PYTHON) apply_schema_v2.py
 
 populate:
 	@echo "🎬 Scraping movie releases..."
-	$(PYTHONPATH_VAL) $(PYTHON) agents/web_scraping_tracker.py
+	$(PYTHON) agents/web_scraping_tracker.py
 	@echo "🔍 Discovering top reviewers..."
-	$(PYTHONPATH_VAL) $(PYTHON) agents/reviewer_discovery.py
+	$(PYTHON) agents/reviewer_discovery.py
 	@echo "📊 Fetching initial ratings..."
-	$(PYTHONPATH_VAL) $(PYTHON) agents/rating_monitor.py
+	$(PYTHON) agents/rating_monitor.py
 	@echo "📈 Analyzing trends..."
-	$(PYTHONPATH_VAL) $(PYTHON) agents/trend_analyzer.py
+	$(PYTHON) agents/trend_analyzer.py
 
 analyze-trends:
-	$(PYTHONPATH_VAL) $(PYTHON) agents/trend_analyzer.py
+	$(PYTHON) agents/trend_analyzer.py
 
 monitor:
-	$(PYTHONPATH_VAL) $(PYTHON) agents/rating_monitor.py --continuous 60
+	$(PYTHON) agents/rating_monitor.py --continuous 60
 
 web:
 	cd web-app && $(NPM) run dev
 
 start:
 	./start_platform.sh
+
+test:
+	@echo "Running integration test: unset PYTHONPATH behavior"
+	@bash tests/scripts/check_unset_pythonpath.sh
 
 clean:
 	@echo "🧹 Cleaning up existing processes..."

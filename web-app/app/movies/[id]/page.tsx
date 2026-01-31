@@ -6,7 +6,7 @@ import TrendBadge from '@/components/TrendBadge';
 export const revalidate = 0;
 
 async function getMovie(id: string) {
-    const result = await query('SELECT * FROM movies WHERE tmdb_id = $1 LIMIT 1', [id]);
+    const result = await query('SELECT * FROM movies WHERE slug = $1 LIMIT 1', [id]);
     return result.rows[0];
 }
 
@@ -243,8 +243,8 @@ export default async function MoviePage({ params }: { params: Promise<{ id: stri
                         <h3 className="text-lg font-bold mb-4 text-gray-300">Film Details</h3>
                         <ul className="space-y-3 text-sm">
                             <li className="flex justify-between">
-                                <span className="text-gray-500">ID</span>
-                                <span className="font-mono text-gray-300">{movie.tmdb_id}</span>
+                                <span className="text-gray-500">Slug</span>
+                                <span className="font-mono text-gray-300">{movie.slug}</span>
                             </li>
                             {movie.language && (
                                 <li className="flex justify-between">

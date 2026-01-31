@@ -51,14 +51,22 @@ class Database:
         if not self.conn: return None
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
             query = """
-                INSERT INTO movies (tmdb_id, title, original_title, release_date, region, language, overview, vote_average, vote_count, popularity, poster_path, backdrop_path, genre_ids, adult, video, trending_score)
-                VALUES (%(tmdb_id)s, %(title)s, %(original_title)s, %(release_date)s, %(region)s, %(language)s, %(overview)s, %(vote_average)s, %(vote_count)s, %(popularity)s, %(poster_path)s, %(backdrop_path)s, %(genre_ids)s, %(adult)s, %(video)s, %(trending_score)s)
-                ON CONFLICT (tmdb_id) DO UPDATE SET
+                INSERT INTO movies (
+                    slug, title, original_title, release_date, 
+                    genres, regions, poster_url, backdrop_url, 
+                    overview, runtime, original_language
+                )
+                VALUES (
+                    %(slug)s, %(title)s, %(original_title)s, %(release_date)s, 
+                    %(genres)s, %(regions)s, %(poster_url)s, %(backdrop_url)s, 
+                    %(overview)s, %(runtime)s, %(original_language)s
+                )
+                ON CONFLICT (slug) DO UPDATE SET
                     title = EXCLUDED.title,
-                    vote_average = EXCLUDED.vote_average,
-                    vote_count = EXCLUDED.vote_count,
-                    popularity = EXCLUDED.popularity,
-                    trending_score = EXCLUDED.trending_score
+                    poster_url = EXCLUDED.poster_url,
+                    backdrop_url = EXCLUDED.backdrop_url,
+                    overview = EXCLUDED.overview,
+                    updated_at = NOW()
                 RETURNING *;
             """
             cur.execute(query, movie_data)
@@ -85,11 +93,11 @@ class Database:
             cur.execute(query, (limit,))
             return cur.fetchall()
 
-    def update_movie_summary(self, tmdb_id, positive_summary, negative_summary):
+    def update_movie_summary(self, slug, positive_summary, negative_summary):
         if not self.conn: return
         with self.conn.cursor() as cur:
-            query = "UPDATE movies SET ai_summary_positive = %s, ai_summary_negative = %s WHERE tmdb_id = %s;"
-            cur.execute(query, (positive_summary, negative_summary, tmdb_id))
+            query = "UPDATE movies SET ai_summary_positive = %s, ai_summary_negative = %s WHERE slug = %s;"
+            cur.execute(query, (positive_summary, negative_summary, slug))
 
     def list_movies(self, region=None, language=None, title_query=None):
         if not self.conn: return []
@@ -108,11 +116,11 @@ class Database:
             cur.execute(query, params)
             return cur.fetchall()
 
-    def get_movie_reviews(self, tmdb_id):
+    def get_movie_reviews(self, slug):
         if not self.conn: return []
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
-            # First get movie title
-            cur.execute("SELECT title FROM movies WHERE tmdb_id = %s;", (tmdb_id,))
+            # First get movie id and title
+            cur.execute("SELECT id, title FROM movies WHERE slug = %s;", (slug,))
             movie = cur.fetchone()
             if not movie: return []
             title = movie['title']
@@ -121,10 +129,10 @@ class Database:
             query = """
                 SELECT r.*, rev.name as reviewer_name 
                 FROM reviews r
-                JOIN reviewers rev ON r.reviewer_id = rev.id
-                WHERE r.movie_title = %s;
+                LEFT JOIN reviewers rev ON r.reviewer_id = rev.id
+                WHERE r.movie_id = %s;
             """
-            cur.execute(query, (title,))
+            cur.execute(query, (movie['id'],))
             results = cur.fetchall()
             # Format to match previous Realtime API structure roughly
             for r in results:

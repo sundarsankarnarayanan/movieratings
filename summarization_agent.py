@@ -17,18 +17,13 @@ def summarization_agent():
     print(f"Found {len(movies_to_process)} movies to summarize.")
     
     for movie in movies_to_process:
-        tmdb_id = movie['tmdb_id']
+        slug = movie['slug']
         title = movie['title']
         
-        print(f"Processing '{title}' (ID: {tmdb_id})...")
+        print(f"Processing '{title}' (Slug: {slug})...")
         
         # Fetch reviews for this movie
-        # Note: Using get_movie_reviews logic which relies on title matching for now
-        # Ideally, we should fetch by ID if our scraping linked them correctly.
-        # Given the current scraper structure, we'll try to fetch by ID first if supported,
-        # but our database.get_movie_reviews uses ID to find title then looks up reviews.
-        # So we can use that.
-        reviews = db.get_movie_reviews(tmdb_id)
+        reviews = db.get_movie_reviews(slug)
         
         if not reviews:
             print(f"  - No reviews found for '{title}'. Skipping.")
@@ -44,7 +39,7 @@ def summarization_agent():
         print(f"  - Generating summary from {len(reviews)} reviews...")
         pos, neg = llm.summarize_reviews(title, reviews_text)
         
-        db.update_movie_summary(tmdb_id, pos, neg)
+        db.update_movie_summary(slug, pos, neg)
         print(f"  - Summary updated for '{title}'.")
         
         # Respect rate limits if needed

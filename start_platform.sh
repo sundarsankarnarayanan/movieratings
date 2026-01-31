@@ -4,6 +4,12 @@
 
 echo "🚀 Starting Movie Intelligence Platform..."
 
+# Warn and unset PYTHONPATH to ensure the project venv is used
+if [ -n "$PYTHONPATH" ]; then
+  echo "⚠️  PYTHONPATH is set — unsetting it to avoid importing incompatible system packages"
+  unset PYTHONPATH
+fi
+
 # 1. Kill any existing processes on common ports
 echo "🧹 Cleaning up existing processes..."
 lsof -ti:3000 | xargs kill -9 2>/dev/null
@@ -15,7 +21,11 @@ echo "📊 Running initial data population..."
 
 # 3. Analyze trends
 echo "📈 Analyzing movie trends..."
-PYTHONPATH=/Users/sundar/Library/Python/3.9/lib/python/site-packages python3 agents/trend_analyzer.py
+if [ -x ".venv/bin/python" ]; then
+  .venv/bin/python agents/trend_analyzer.py
+else
+  python3 agents/trend_analyzer.py
+fi
 
 # 4. Start the Web App in the background
 echo "🌐 Starting Web Dashboard..."
@@ -26,7 +36,11 @@ cd ..
 
 # 5. Start the Rating Monitor in the background (continuous mode)
 echo "⏱️ Starting Real-Time Rating Monitor (multi-source)..."
-PYTHONPATH=/Users/sundar/Library/Python/3.9/lib/python/site-packages python3 agents/rating_monitor.py --continuous 60 &
+if [ -x ".venv/bin/python" ]; then
+  .venv/bin/python agents/rating_monitor.py --continuous 60 &
+else
+  python3 agents/rating_monitor.py --continuous 60 &
+fi
 MONITOR_PID=$!
 
 echo ""
